@@ -4,6 +4,9 @@
 *.pem
 config_local.py
 
+# Claude Code IDE files
+.claude/
+
 # Logs
 *.log
 logs/
