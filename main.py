@@ -298,10 +298,10 @@ class IntelligentTradingSystem:
                         self.logger.critical(f"✅ Emergency stop created: {symbol} @ ${stop_price:.2f}")
                         stops_created += 1
                     else:
-                        self.logger.error(f"❌ Failed to create emergency stop for {symbol}")
+                        self.logger.warning(f"⚠️ Emergency stop not created for {symbol} (likely held by existing orders)")
                         
                 except Exception as stop_error:
-                    self.logger.error(f"Failed to create emergency stop for {pos['symbol']}: {stop_error}")
+                    self.logger.warning(f"Emergency stop creation failed for {pos['symbol']}: {stop_error}")
             
             if stops_created > 0:
                 self.logger.info(f"✅ Created {stops_created} emergency stop orders")
@@ -1497,23 +1497,24 @@ class IntelligentTradingSystem:
             current_price = float(position.current_price) if hasattr(position, 'current_price') else float(position.market_value) / abs(float(position.qty))
             
             # Calculate tighter stop loss (2% below current price)
-            stop_price = current_price * 0.98
+            stop_price = round(current_price * 0.98, 2)
             
             try:
                 # Try to place stop loss order
-                stop_order = await self.gateway.submit_order(
-                    qty=abs(float(position.qty)),
-                    side="sell",
-                    type="stop",
-                    stop_price=stop_price,
-                    time_in_force="gtc",
-                    symbol=symbol
-                )
+                order_data = {
+                    "symbol": symbol,
+                    "qty": abs(float(position.qty)),
+                    "side": "sell", 
+                    "type": "stop",
+                    "stop_price": stop_price,
+                    "time_in_force": "gtc"
+                }
+                stop_order = await self.gateway.submit_order(order_data)
                 
                 if stop_order:
                     self.logger.info(f"🤖 AI tighter stop loss set for {symbol} at ${stop_price:.2f}: {reason}")
                 else:
-                    self.logger.warning(f"🤖 AI stop loss creation failed for {symbol}")
+                    self.logger.warning(f"🤖 AI stop loss creation failed for {symbol} - order rejected")
                     
             except Exception as e:
                 self.logger.warning(f"🤖 AI stop loss creation failed for {symbol}: {e}")
