@@ -243,7 +243,7 @@ class ResilientAlpacaGateway:
                 logger.info(f"Order submitted: {order_data['symbol']} {order_data['side']} {order_data['qty']}")
                 return self._parse_order_data(response.data)
             else:
-                # Enhanced error handling for PDT violations
+                # Enhanced error handling for common scenarios
                 if response.status_code == 403 and '40310100' in str(response.error):
                     # PDT violation - log with clear explanation
                     logger.error(f"PDT VIOLATION: Order blocked for {order_data['symbol']} - Pattern Day Trading rules exceeded")
@@ -252,6 +252,9 @@ class ResilientAlpacaGateway:
                     if not hasattr(self, '_pdt_blocked_symbols'):
                         self._pdt_blocked_symbols = set()
                     self._pdt_blocked_symbols.add(order_data['symbol'])
+                elif response.status_code == 403 and '40310000' in str(response.error) and 'insufficient qty available' in str(response.error):
+                    # Shares held by existing orders - this is expected for stop loss scenarios
+                    logger.debug(f"Order not submitted for {order_data['symbol']} - shares held by existing orders (expected for protected positions)")
                 else:
                     logger.error(f"Order submission failed: {response.error}")
                 return None
