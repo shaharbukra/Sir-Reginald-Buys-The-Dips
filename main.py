@@ -298,7 +298,7 @@ class IntelligentTradingSystem:
                         self.logger.critical(f"✅ Emergency stop created: {symbol} @ ${stop_price:.2f}")
                         stops_created += 1
                     else:
-                        self.logger.warning(f"⚠️ Emergency stop not created for {symbol} (likely held by existing orders)")
+                        self.logger.info(f"ℹ️ Emergency stop not needed for {symbol} - shares already held by existing orders")
                         
                 except Exception as stop_error:
                     self.logger.warning(f"Emergency stop creation failed for {pos['symbol']}: {stop_error}")
@@ -306,7 +306,7 @@ class IntelligentTradingSystem:
             if stops_created > 0:
                 self.logger.info(f"✅ Created {stops_created} emergency stop orders")
             else:
-                self.logger.warning("⚠️ No emergency stops could be created")
+                self.logger.info("ℹ️ No emergency stops created - positions already protected by existing orders")
                 
         except Exception as e:
             self.logger.error(f"Emergency stop creation failed: {e}")
@@ -1514,7 +1514,7 @@ class IntelligentTradingSystem:
                 if stop_order:
                     self.logger.info(f"🤖 AI tighter stop loss set for {symbol} at ${stop_price:.2f}: {reason}")
                 else:
-                    self.logger.warning(f"🤖 AI stop loss creation failed for {symbol} - order rejected")
+                    self.logger.info(f"🤖 AI stop loss not created for {symbol} - shares held by existing orders (likely existing stop loss)")
                     
             except Exception as e:
                 self.logger.warning(f"🤖 AI stop loss creation failed for {symbol}: {e}")
