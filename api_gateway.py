@@ -75,9 +75,21 @@ class ResilientAlpacaGateway:
             return False
             
     async def shutdown(self):
-        """Clean shutdown of the gateway"""
-        if self.session:
-            await self.session.close()
+        """Clean shutdown of the gateway with proper connection handling"""
+        try:
+            if self.session and not self.session.closed:
+                # Give pending requests time to complete
+                await asyncio.sleep(0.1)
+                await self.session.close()
+                # Wait for the underlying connections to close
+                await asyncio.sleep(0.1)
+                self.session = None
+                logger.info("✅ API Gateway session closed cleanly")
+        except Exception as e:
+            logger.warning(f"⚠️ Gateway shutdown warning: {e}")
+        finally:
+            # Ensure session is set to None even if close failed
+            self.session = None
             
     async def _make_request(self, method: str, endpoint: str, data: Dict = None, 
                           params: Dict = None, retry_count: int = 0) -> ApiResponse:

@@ -54,9 +54,21 @@ class EnhancedAIAssistant:
             self.session = None
         
     async def shutdown(self):
-        """Clean shutdown"""
-        if self.session:
-            await self.session.close()
+        """Clean shutdown with proper connection handling"""
+        try:
+            if self.session and not self.session.closed:
+                # Give pending requests time to complete
+                await asyncio.sleep(0.1)
+                await self.session.close()
+                # Wait for the underlying connections to close
+                await asyncio.sleep(0.1)
+                self.session = None
+                logger.info("✅ AI Assistant session closed cleanly")
+        except Exception as e:
+            logger.warning(f"⚠️ AI Assistant shutdown warning: {e}")
+        finally:
+            # Ensure session is set to None even if close failed
+            self.session = None
             
     async def generate_daily_market_intelligence(self, market_data: Dict) -> MarketIntelligence:
         """Generate comprehensive daily market intelligence report"""

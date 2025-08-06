@@ -1411,35 +1411,50 @@ class IntelligentTradingSystem:
             )
             
     async def _graceful_shutdown(self):
-        """Graceful system shutdown"""
+        """Graceful system shutdown with proper async resource cleanup"""
         try:
             self.logger.info("🛑 GRACEFUL SHUTDOWN INITIATED")
+            self.running = False
+            
+            # Close components in reverse order of initialization
+            shutdown_tasks = []
             
             # Close AI assistant
             if self.ai_assistant:
                 try:
-                    await self.ai_assistant.shutdown()
-                    self.logger.info("✅ AI Assistant shutdown completed")
+                    shutdown_tasks.append(self.ai_assistant.shutdown())
                 except Exception as shutdown_error:
                     self.logger.warning(f"⚠️ AI ASSISTANT SHUTDOWN WARNING: {shutdown_error}")
-                    self.logger.warning(f"⚠️ AI session may not have closed cleanly")
                 
             # Close API gateway
             if self.gateway:
-                await self.gateway.shutdown()
+                shutdown_tasks.append(self.gateway.shutdown())
                 
             # Close supplemental data provider
             if self.supplemental_data:
-                await self.supplemental_data.shutdown()
-                
+                try:
+                    shutdown_tasks.append(self.supplemental_data.shutdown())
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Supplemental data shutdown warning: {e}")
+            
+            # Wait for all shutdown tasks to complete
+            if shutdown_tasks:
+                await asyncio.gather(*shutdown_tasks, return_exceptions=True)
+            
             # Generate final performance report
-            final_report = await self.performance_tracker.generate_final_report()
-            self.logger.info(f"📊 FINAL PERFORMANCE: {json.dumps(final_report, indent=2)}")
+            try:
+                final_report = await self.performance_tracker.generate_final_report()
+                self.logger.info(f"📊 FINAL PERFORMANCE: {json.dumps(final_report, indent=2)}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Final report generation failed: {e}")
             
             self.logger.info("✅ SYSTEM SHUTDOWN COMPLETE")
             
         except Exception as e:
             self.logger.error(f"Graceful shutdown error: {e}")
+        finally:
+            # Give the event loop time to finish cleanup
+            await asyncio.sleep(0.1)
     
     async def test_tiered_analysis_with_hot_stocks(self):
         """
