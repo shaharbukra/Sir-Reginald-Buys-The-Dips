@@ -1307,16 +1307,28 @@ class IntelligentTradingSystem:
                 except Exception as pos_error:
                     self.logger.error(f"Extended hours monitoring failed for {position.symbol}: {pos_error}")
             
-            # Send alerts for significant gap moves
+            # Send alerts for significant gap moves with AI decision making
             if gap_risk_alerts:
                 for alert in gap_risk_alerts:
                     self.logger.critical(f"🚨 GAP RISK: {alert['symbol']} moved {alert['move_pct']:+.1f}% to ${alert['current_price']:.2f} in {period}")
-                
-                symbols_with_gaps = [alert['symbol'] for alert in gap_risk_alerts]
-                await self.alerter.send_critical_alert(
-                    f"Extended hours gap risk detected in {period}",
-                    f"Significant moves detected: {', '.join(symbols_with_gaps)}"
-                )
+                    
+                    # Get AI decision for each significant gap
+                    context = {
+                        "market_session": period,
+                        "position_value": alert.get('position_value', 0),
+                        "account_equity": self.performance_tracker.current_equity if hasattr(self, 'performance_tracker') else 2000
+                    }
+                    
+                    ai_decision = await self.alerter.send_gap_risk_alert_with_ai(
+                        alert['symbol'], 
+                        alert['move_pct'], 
+                        alert['current_price'],
+                        context
+                    )
+                    
+                    # Execute AI decision if confident and actionable
+                    if ai_decision['confidence'] > 0.7 and ai_decision['decision'] != 'manual_review':
+                        await self._execute_ai_decision(alert['symbol'], ai_decision)
             
             # Sleep for 5 minutes before next extended hours check
             self.logger.debug(f"🔄 Extended hours monitoring cycle complete - sleeping 5 minutes")
@@ -1399,6 +1411,112 @@ class IntelligentTradingSystem:
         except Exception as e:
             self.logger.error(f"System health check failed: {e}")
             
+    async def _execute_ai_decision(self, symbol: str, ai_decision: Dict):
+        """Execute AI decision for gap risk management"""
+        try:
+            decision = ai_decision['decision']
+            self.logger.info(f"🤖 Executing AI decision for {symbol}: {decision}")
+            
+            if decision == "emergency_sell":
+                # Attempt immediate market sell (if market is open)
+                await self._emergency_sell_position(symbol, "AI emergency decision")
+                
+            elif decision == "sell_market_open":
+                # Create sell order for market open (will execute when market opens)
+                await self._schedule_market_open_sell(symbol, "AI scheduled sell decision")
+                
+            elif decision == "set_stop_loss":
+                # Create or tighten stop loss
+                await self._create_tighter_stop_loss(symbol, "AI stop loss adjustment")
+                
+            elif decision == "hold":
+                self.logger.info(f"🤖 AI recommends holding {symbol} - no action taken")
+                
+            else:  # manual_review or unknown
+                self.logger.info(f"🤖 AI recommends manual review for {symbol}")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to execute AI decision for {symbol}: {e}")
+    
+    async def _emergency_sell_position(self, symbol: str, reason: str):
+        """Emergency sell position if market allows"""
+        try:
+            # Check if we have the position
+            position = await self.gateway.get_position(symbol)
+            if not position or float(position.qty) == 0:
+                self.logger.info(f"No position in {symbol} to emergency sell")
+                return
+                
+            # Try to place market sell order (will fail if market closed)
+            try:
+                sell_order = await self.order_executor.execute_trade(
+                    TradingSignal(
+                        symbol=symbol,
+                        action="SELL",
+                        quantity=abs(float(position.qty)),
+                        confidence=0.9,
+                        reasoning=f"AI Emergency Sell: {reason}",
+                        strategy_name="AI_EMERGENCY"
+                    )
+                )
+                
+                if sell_order:
+                    self.logger.info(f"🤖 AI Emergency sell executed for {symbol}: {sell_order.id}")
+                else:
+                    self.logger.warning(f"🤖 AI Emergency sell failed for {symbol} - market likely closed")
+                    
+            except Exception as e:
+                self.logger.warning(f"🤖 AI Emergency sell failed for {symbol}: {e}")
+                
+        except Exception as e:
+            self.logger.error(f"Emergency sell position failed for {symbol}: {e}")
+    
+    async def _schedule_market_open_sell(self, symbol: str, reason: str):
+        """Schedule sell order for market open"""
+        try:
+            # For now, just log the intention - could be enhanced with order scheduling
+            self.logger.info(f"🤖 AI scheduled sell for {symbol} at market open: {reason}")
+            # TODO: Implement order scheduling system for market open execution
+            
+        except Exception as e:
+            self.logger.error(f"Schedule market open sell failed for {symbol}: {e}")
+    
+    async def _create_tighter_stop_loss(self, symbol: str, reason: str):
+        """Create or tighten stop loss for position"""
+        try:
+            position = await self.gateway.get_position(symbol)
+            if not position or float(position.qty) == 0:
+                self.logger.info(f"No position in {symbol} for stop loss adjustment")
+                return
+                
+            # Get current price
+            current_price = float(position.current_price) if hasattr(position, 'current_price') else float(position.market_value) / abs(float(position.qty))
+            
+            # Calculate tighter stop loss (2% below current price)
+            stop_price = current_price * 0.98
+            
+            try:
+                # Try to place stop loss order
+                stop_order = await self.gateway.submit_order(
+                    symbol=symbol,
+                    qty=abs(float(position.qty)),
+                    side="sell",
+                    type="stop",
+                    stop_price=stop_price,
+                    time_in_force="gtc"
+                )
+                
+                if stop_order:
+                    self.logger.info(f"🤖 AI tighter stop loss set for {symbol} at ${stop_price:.2f}: {reason}")
+                else:
+                    self.logger.warning(f"🤖 AI stop loss creation failed for {symbol}")
+                    
+            except Exception as e:
+                self.logger.warning(f"🤖 AI stop loss creation failed for {symbol}: {e}")
+                
+        except Exception as e:
+            self.logger.error(f"Create tighter stop loss failed for {symbol}: {e}")
+
     async def _emergency_shutdown(self, reason: str):
         """Emergency shutdown with position protection"""
         try:
