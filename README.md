@@ -1,8 +1,21 @@
-# 🚀 AI-Driven Market-Wide Trading System
+# 🚀 Sir Reginald Buys The Dips
 
-**Professional Implementation with Intelligent Funnel Architecture**
+**AI-Driven Algorithmic Trading System with Production-Grade Safety**
 
-A production-ready, AI-enhanced algorithmic trading system that systematically discovers opportunities across the entire market using an intelligent funnel approach. Leverages Alpaca's full API capabilities while respecting rate limits, uses Ollama 13B for market intelligence, and implements institutional-grade risk management for sustainable wealth building.
+A sophisticated algorithmic trading platform that combines artificial intelligence, comprehensive risk management, and professional-grade safety systems to automate stock trading through Alpaca Markets. Features circuit breakers, PDT protection, position reconciliation, and extensive monitoring.
+
+## 📖 Complete Documentation
+
+**👉 [READ THE FULL WIKI](WIKI.md) for comprehensive setup, configuration, and usage instructions**
+
+The wiki contains everything you need:
+- Complete installation guide  
+- Configuration and tuning options
+- Trading strategy explanations
+- Safety system details
+- Troubleshooting guides
+- Advanced customization
+- Security best practices
 
 ## 🏗️ System Architecture
 
@@ -60,25 +73,23 @@ A production-ready, AI-enhanced algorithmic trading system that systematically d
 
 ## 🚀 Quick Start
 
-### 1. System Setup
-
+### 1. Clone Repository
 ```bash
-# Clone or download the system files
-git clone <repository-url>
-cd ai-trading-system
-
-# Run automated setup
-chmod +x setup.sh
-./setup.sh
+git clone https://github.com/nullenc0de/Sir-Reginald-Buys-The-Dips.git
+cd Sir-Reginald-Buys-The-Dips
 ```
 
-### 2. Configuration
+### 2. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
 
+### 3. Configure API Credentials
 ```bash
 # Copy environment template
 cp .env.example .env
 
-# Edit with your credentials
+# Edit with your Alpaca API credentials
 nano .env
 ```
 
@@ -89,22 +100,21 @@ APCA_API_SECRET_KEY=your_alpaca_secret_key_here
 PAPER_TRADING=true
 ```
 
-### 3. Validation
-
+### 4. Start Trading System
 ```bash
-# Validate system configuration
-python validate_system.py
+python main.py
 ```
 
-### 4. Start Trading
+**⚠️ IMPORTANT**: Always start with paper trading! Set `PAPER_TRADING=true` in your `.env` file.
 
-```bash
-# Start the trading system
-./start_trading.sh
+## 🛡️ Key Safety Features
 
-# Monitor in another terminal
-python monitor_system.py
-```
+- **Circuit Breakers**: Automatic trading halt on 5% portfolio loss
+- **PDT Protection**: Prevents Pattern Day Trading violations  
+- **Position Reconciliation**: Validates all positions have stop losses at startup
+- **Stale Data Detection**: Rejects trades based on outdated market data
+- **Emergency Liquidation**: Automatic position closure for risk management
+- **Extended Hours Monitoring**: Gap risk alerts for overnight positions
 
 ## 📊 Expected Performance
 
@@ -290,26 +300,38 @@ ollama pull llama3:13b
 chmod +x *.sh *.py
 ```
 
-## 📚 Advanced Usage
+## 🎯 System Requirements
 
-### Custom Strategy Development
-Extend `enhanced_momentum_strategy.py` with your own signal generation logic.
+- **Alpaca Markets Account**: Paper trading supported
+- **Python 3.8+**: For running the system
+- **API Credentials**: Alpaca Key ID and Secret Key
+- **Internet Connection**: For market data and trade execution
 
-### AI Prompt Customization
-Modify prompts in `ai_market_intelligence.py` for different analysis styles.
+## 📚 Learn More
 
-### Risk Parameter Tuning
-Adjust risk parameters in `config.py` based on your risk tolerance.
+For complete documentation including:
+- **Installation Guide**: Step-by-step setup instructions
+- **Configuration Options**: Risk parameters and strategy settings  
+- **Trading Strategies**: Momentum, mean reversion, and breakout approaches
+- **Safety Systems**: Detailed explanation of all protective measures
+- **Troubleshooting**: Common issues and solutions
+- **Advanced Topics**: Custom strategies and performance optimization
 
-### Performance Optimization
-Monitor API usage and optimize scan frequencies for your needs.
+**👉 [Read the Complete Wiki](WIKI.md)**
 
-## 🤝 Support & Community
+## 🤝 Contributing
 
-- **Issues**: Report bugs and feature requests
-- **Documentation**: Comprehensive inline documentation
-- **Examples**: Real trading examples and case studies
-- **Best Practices**: Proven strategies and configurations
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Test thoroughly in paper trading mode
+4. Submit a pull request
+
+## 📞 Support
+
+- **Issues**: Report bugs via GitHub Issues
+- **Discussions**: Share strategies and improvements
+- **Wiki**: Comprehensive documentation and guides
 
 ## 📄 License
 
