@@ -64,7 +64,7 @@ class IntelligentTradingSystem:
         self.risk_manager = ConservativeRiskManager()
         self.order_executor = SimpleTradeExecutor(self.gateway, self.risk_manager)
         # Note: PDT manager will be linked after initialization
-        self.performance_tracker = PerformanceTracker()
+        self.performance_tracker = None  # Will be initialized after gateway
         self.corporate_actions_filter = CorporateActionsFilter()  # CRITICAL: Corporate actions protection
         self.alerter = CriticalAlerter()  # CRITICAL: Emergency alerting system
         self.pdt_manager = PDTManager()  # CRITICAL: PDT rule compliance
@@ -152,7 +152,9 @@ class IntelligentTradingSystem:
             self.logger.info("✅ Risk Manager initialized")
             
             # Initialize performance tracker
-            await self.performance_tracker.initialize(account_value)
+            # Initialize performance tracker with gateway access
+            self.performance_tracker = PerformanceTracker(self.gateway)
+            await self.performance_tracker.initialize()
             self.logger.info("✅ Performance Tracker ready")
             
             # Initialize PDT manager
@@ -1336,16 +1338,33 @@ class IntelligentTradingSystem:
             self.logger.error(f"Failed to record market close positions: {e}")
             
     async def _update_performance_metrics(self):
-        """Update comprehensive performance tracking"""
+        """Update comprehensive performance tracking using REAL Alpaca data"""
         try:
-            await self.performance_tracker.update_performance()
-            
-            # Get daily summary
+            if not self.performance_tracker:
+                return
+                
+            # Get REAL performance data
             daily_performance = await self.performance_tracker.get_daily_summary()
             
-            if daily_performance.get('return_pct', 0) != 0:
-                self.logger.info(f"📊 Daily Performance: {daily_performance['return_pct']:.2%} "
-                               f"| Total: ${daily_performance['total_value']:,.2f}")
+            if 'error' in daily_performance:
+                self.logger.warning(f"⚠️ Performance tracking error: {daily_performance['error']}")
+                return
+            
+            # Display REAL performance using Alpaca API data
+            current_equity = daily_performance.get('current_equity', 0.0)
+            daily_pnl = daily_performance.get('daily_pnl', 0.0)
+            daily_pnl_pct = daily_performance.get('daily_pnl_pct', 0.0)
+            total_pnl = daily_performance.get('total_pnl', 0.0)
+            total_pnl_pct = daily_performance.get('total_pnl_pct', 0.0)
+            
+            # Color coding for P&L display
+            daily_color = "🟢" if daily_pnl >= 0 else "🔴"
+            total_color = "🟢" if total_pnl >= 0 else "🔴"
+            
+            self.logger.info(f"💰 REAL PERFORMANCE (Alpaca API):")
+            self.logger.info(f"   Current Equity: ${current_equity:,.2f}")
+            self.logger.info(f"   Daily P&L: {daily_color} ${daily_pnl:+.2f} ({daily_pnl_pct:+.2f}%)")
+            self.logger.info(f"   Total P&L: {total_color} ${total_pnl:+.2f} ({total_pnl_pct:+.2f}%)")
                                
         except Exception as e:
             self.logger.error(f"Performance tracking failed: {e}")
