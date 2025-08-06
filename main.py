@@ -1312,18 +1312,22 @@ class IntelligentTradingSystem:
                 for alert in gap_risk_alerts:
                     self.logger.critical(f"🚨 GAP RISK: {alert['symbol']} moved {alert['move_pct']:+.1f}% to ${alert['current_price']:.2f} in {period}")
                     
-                    # Get AI decision for each significant gap
+                    # Collect comprehensive data for AI decision
                     context = {
                         "market_session": period,
                         "position_value": alert.get('position_value', 0),
                         "account_equity": self.performance_tracker.current_equity if hasattr(self, 'performance_tracker') else 2000
                     }
                     
+                    # Gather enhanced market data for AI analysis
+                    enhanced_data = await self._collect_comprehensive_market_data(alert['symbol'])
+                    
                     ai_decision = await self.alerter.send_gap_risk_alert_with_ai(
                         alert['symbol'], 
                         alert['move_pct'], 
                         alert['current_price'],
-                        context
+                        context,
+                        enhanced_data
                     )
                     
                     # Execute AI decision if confident and actionable
@@ -1516,6 +1520,129 @@ class IntelligentTradingSystem:
                 
         except Exception as e:
             self.logger.error(f"Create tighter stop loss failed for {symbol}: {e}")
+
+    async def _collect_comprehensive_market_data(self, symbol: str) -> Dict:
+        """Collect comprehensive market data for AI decision making"""
+        enhanced_data = {}
+        
+        try:
+            self.logger.debug(f"📊 Collecting comprehensive data for {symbol}...")
+            
+            # === POSITION DETAILS ===
+            try:
+                position = await self.gateway.get_position(symbol)
+                if position and float(position.qty) != 0:
+                    enhanced_data.update({
+                        "position_qty": float(position.qty),
+                        "position_avg_cost": float(position.avg_entry_price),
+                        "position_current_pnl": float(position.unrealized_pl),
+                        "position_pnl_percent": (float(position.unrealized_plpc) * 100),
+                        "account_allocation_percent": (float(position.market_value) / self.performance_tracker.current_equity * 100) if hasattr(self, 'performance_tracker') else 0
+                    })
+            except Exception as e:
+                self.logger.debug(f"Position data collection failed for {symbol}: {e}")
+            
+            # === MARKET CONTEXT ===
+            try:
+                if hasattr(self, 'current_intelligence') and self.current_intelligence:
+                    enhanced_data.update({
+                        "market_regime": self.current_intelligence.market_regime,
+                        "market_volatility": self.current_intelligence.volatility_regime
+                    })
+                
+                # Get SPY performance for market context
+                spy_bars = await self.supplemental_data_provider.get_historical_data("SPY", days=1, min_bars=1)
+                if spy_bars and len(spy_bars) >= 1:
+                    spy_current = float(spy_bars[-1]['c'])
+                    spy_prev = float(spy_bars[0]['o']) if len(spy_bars) == 1 else float(spy_bars[-2]['c'])
+                    spy_change = ((spy_current - spy_prev) / spy_prev * 100) if spy_prev > 0 else 0
+                    enhanced_data["spy_performance_today"] = f"{spy_change:+.1f}%"
+                
+            except Exception as e:
+                self.logger.debug(f"Market context collection failed: {e}")
+            
+            # === TECHNICAL ANALYSIS ===
+            try:
+                # Get historical bars for technical analysis
+                bars = await self.supplemental_data_provider.get_historical_data(symbol, days=30, min_bars=20)
+                if bars and len(bars) >= 20:
+                    closes = [float(bar['c']) for bar in bars]
+                    volumes = [int(bar['v']) for bar in bars]
+                    
+                    # Calculate moving average
+                    ma20 = sum(closes[-20:]) / 20
+                    current_price = closes[-1]
+                    enhanced_data["price_vs_ma20"] = f"{((current_price - ma20) / ma20 * 100):+.1f}%"
+                    
+                    # Volume analysis
+                    avg_volume = sum(volumes[-20:]) / 20
+                    current_volume = volumes[-1]
+                    enhanced_data["volume_vs_average"] = f"{(current_volume / avg_volume):.1f}x" if avg_volume > 0 else "N/A"
+                    
+                    # Simple RSI calculation (simplified)
+                    if len(closes) >= 14:
+                        gains = []
+                        losses = []
+                        for i in range(1, 15):  # Last 14 periods
+                            change = closes[-(i+1)] - closes[-(i+2)]
+                            if change > 0:
+                                gains.append(change)
+                                losses.append(0)
+                            else:
+                                gains.append(0)
+                                losses.append(abs(change))
+                        
+                        avg_gain = sum(gains) / 14
+                        avg_loss = sum(losses) / 14
+                        if avg_loss != 0:
+                            rs = avg_gain / avg_loss
+                            rsi = 100 - (100 / (1 + rs))
+                            enhanced_data["rsi"] = f"{rsi:.1f}"
+                    
+                    # Support and resistance (simple high/low)
+                    lows = [float(bar['l']) for bar in bars[-20:]]
+                    highs = [float(bar['h']) for bar in bars[-20:]]
+                    enhanced_data["support_level"] = min(lows)
+                    enhanced_data["resistance_level"] = max(highs)
+                    
+            except Exception as e:
+                self.logger.debug(f"Technical analysis failed for {symbol}: {e}")
+            
+            # === RISK METRICS ===
+            try:
+                if "position_current_pnl" in enhanced_data and "account_allocation_percent" in enhanced_data:
+                    # Calculate maximum potential loss from current position
+                    current_position_value = enhanced_data.get("position_qty", 0) * enhanced_data.get("position_avg_cost", 0)
+                    max_loss_percent = (current_position_value / (self.performance_tracker.current_equity if hasattr(self, 'performance_tracker') else 2000)) * 100
+                    enhanced_data["max_loss_from_here"] = f"{max_loss_percent:.1f}%"
+                
+                # Estimate correlation with SPY (simplified)
+                enhanced_data["correlation_with_market"] = "medium"  # Placeholder - could be calculated with more data
+                
+            except Exception as e:
+                self.logger.debug(f"Risk metrics calculation failed for {symbol}: {e}")
+            
+            # === TIMING DATA ===
+            try:
+                # Calculate days held (simplified - would need order history)
+                enhanced_data["days_held"] = "recent"  # Placeholder
+                
+                # News sentiment (placeholder - could integrate news API)
+                enhanced_data["news_sentiment"] = "neutral"
+                
+                # Historical gap analysis (placeholder)
+                enhanced_data["similar_gaps_outcome"] = "mixed results"
+                enhanced_data["recovery_probability"] = "moderate"
+                
+            except Exception as e:
+                self.logger.debug(f"Timing data collection failed for {symbol}: {e}")
+            
+            self.logger.info(f"📊 Collected {len(enhanced_data)} data points for AI analysis of {symbol}")
+            
+        except Exception as e:
+            self.logger.error(f"Comprehensive data collection failed for {symbol}: {e}")
+        
+        return enhanced_data
 
     async def _emergency_shutdown(self, reason: str):
         """Emergency shutdown with position protection"""

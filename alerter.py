@@ -198,35 +198,122 @@ class CriticalAlerter:
             return {"decision": "manual_review", "reasoning": f"AI error: {e}"}
     
     def _create_decision_prompt(self, alert_type: str, context: Dict[str, Any]) -> str:
-        """Create prompt for AI decision making"""
-        base_prompt = """You are Sir Reginald, an AI trading assistant managing a live $2000 paper trading account. 
-A CRITICAL trading alert has been triggered that requires immediate decision making.
+        """Create comprehensive prompt for AI decision making with rich market data"""
+        
+        # Extract key data points for analysis
+        symbol = context.get('symbol', 'UNKNOWN')
+        gap_percent = context.get('gap_percent', 0)
+        current_price = context.get('current_price', 0)
+        position_pnl = context.get('position_pnl_percent', 'unknown')
+        account_allocation = context.get('account_allocation_percent', 'unknown')
+        market_regime = context.get('market_regime', 'unknown')
+        days_held = context.get('days_held', 'unknown')
+        
+        base_prompt = f"""You are Sir Reginald, an expert AI trading assistant managing a $2000 paper trading account.
+A CRITICAL gap risk alert has been triggered for {symbol} requiring immediate decision making.
 
-ALERT TYPE: {alert_type}
-CONTEXT: {context}
+=== SITUATION ANALYSIS ===
+SYMBOL: {symbol}
+GAP: {gap_percent:+.1f}% to ${current_price:.2f}
+POSITION P&L: {position_pnl}
+ACCOUNT ALLOCATION: {account_allocation}
+DAYS HELD: {days_held}
+MARKET REGIME: {market_regime}
 
-Your trading philosophy:
-- Risk management is paramount 
-- Cut losses quickly, let winners run
-- No position should risk more than 2-3% of account
-- Extended hours gaps >5% are dangerous
-- Always protect capital first
+=== COMPLETE MARKET DATA ===
+{self._format_context_data(context)}
+
+=== YOUR TRADING PHILOSOPHY ===
+- Risk management is PARAMOUNT - never risk more than 2-3% of account on any position
+- Cut losses quickly at -5% to -8%, let winners run to +15-20%
+- Extended hours gaps >5% are DANGEROUS - market makers can manipulate prices
+- Consider position size, days held, market context, and technical levels
+- In volatile markets, reduce position sizes and tighten stops
+- Earnings and news events create unpredictable gaps - be extra cautious
+- If unsure, ALWAYS protect capital first
+
+=== DECISION FRAMEWORK ===
+EMERGENCY_SELL: Immediate danger, gap >8%, or account risk >3%
+SELL_MARKET_OPEN: Gap 5-8%, negative trend, or position getting too large
+SET_STOP_LOSS: Gap 3-5%, mixed signals, want to limit further downside
+HOLD: Gap <3%, strong fundamentals, good market conditions, small position
+MANUAL_REVIEW: Complex situation, conflicting signals, need human judgment
 
 RESPOND WITH ONLY A JSON object in this exact format:
 {{
   "decision": "hold|sell_market_open|set_stop_loss|emergency_sell|manual_review",
-  "reasoning": "Brief explanation of decision",
+  "reasoning": "Detailed explanation based on the data provided",
   "confidence": 0.85,
   "risk_level": "low|medium|high",
-  "action_details": "Specific action to take if any"
+  "action_details": "Specific price levels or conditions for action"
 }}
 
-Be decisive and conservative. When in doubt, protect capital."""
+Analyze ALL the provided data. Be decisive but conservative. Protect capital above all."""
 
-        return base_prompt.format(
-            alert_type=alert_type,
-            context=json.dumps(context, indent=2)
-        )
+        return base_prompt
+    
+    def _format_context_data(self, context: Dict[str, Any]) -> str:
+        """Format context data for AI analysis"""
+        formatted = []
+        
+        # Position Details
+        if any(k in context for k in ['position_qty', 'position_avg_cost', 'position_current_pnl']):
+            formatted.append("POSITION DETAILS:")
+            formatted.append(f"  Quantity: {context.get('position_qty', 'N/A')}")
+            formatted.append(f"  Avg Cost: ${context.get('position_avg_cost', 'N/A')}")
+            formatted.append(f"  Current P&L: {context.get('position_current_pnl', 'N/A')}")
+            formatted.append(f"  P&L %: {context.get('position_pnl_percent', 'N/A')}")
+            formatted.append("")
+        
+        # Market Context
+        if any(k in context for k in ['spy_performance_today', 'sector_performance']):
+            formatted.append("MARKET CONTEXT:")
+            formatted.append(f"  SPY Performance Today: {context.get('spy_performance_today', 'N/A')}")
+            formatted.append(f"  Sector Performance: {context.get('sector_performance', 'N/A')}")
+            formatted.append(f"  Market Volatility: {context.get('market_volatility', 'N/A')}")
+            formatted.append("")
+        
+        # Technical Analysis
+        if any(k in context for k in ['rsi', 'price_vs_ma20', 'volume_vs_average']):
+            formatted.append("TECHNICAL ANALYSIS:")
+            formatted.append(f"  RSI: {context.get('rsi', 'N/A')}")
+            formatted.append(f"  Price vs MA20: {context.get('price_vs_ma20', 'N/A')}")
+            formatted.append(f"  Volume vs Average: {context.get('volume_vs_average', 'N/A')}")
+            formatted.append(f"  Support Level: ${context.get('support_level', 'N/A')}")
+            formatted.append(f"  Resistance Level: ${context.get('resistance_level', 'N/A')}")
+            formatted.append("")
+        
+        # Risk Metrics
+        if any(k in context for k in ['max_loss_from_here', 'correlation_with_market']):
+            formatted.append("RISK METRICS:")
+            formatted.append(f"  Max Loss From Here: {context.get('max_loss_from_here', 'N/A')}")
+            formatted.append(f"  Market Correlation: {context.get('correlation_with_market', 'N/A')}")
+            formatted.append("")
+        
+        # News & Events
+        if any(k in context for k in ['earnings_date', 'news_sentiment']):
+            formatted.append("NEWS & EVENTS:")
+            formatted.append(f"  Next Earnings: {context.get('earnings_date', 'N/A')}")
+            formatted.append(f"  News Sentiment: {context.get('news_sentiment', 'N/A')}")
+            formatted.append(f"  Insider Trading: {context.get('insider_trading', 'N/A')}")
+            formatted.append("")
+        
+        # Historical Context
+        if any(k in context for k in ['similar_gaps_outcome', 'recovery_probability']):
+            formatted.append("HISTORICAL CONTEXT:")
+            formatted.append(f"  Similar Gaps Outcome: {context.get('similar_gaps_outcome', 'N/A')}")
+            formatted.append(f"  Recovery Probability: {context.get('recovery_probability', 'N/A')}")
+            formatted.append("")
+        
+        # If no enhanced data, show basic context
+        if not formatted:
+            formatted.append("BASIC DATA ONLY (Limited Context):")
+            formatted.append(f"  Symbol: {context.get('symbol', 'N/A')}")
+            formatted.append(f"  Gap: {context.get('gap_percent', 'N/A')}%")
+            formatted.append(f"  Current Price: ${context.get('current_price', 'N/A')}")
+            formatted.append(f"  Account Equity: ${context.get('account_equity', 'N/A')}")
+        
+        return "\n".join(formatted)
     
     def _parse_ai_response(self, response: str) -> Dict[str, Any]:
         """Parse AI response and extract decision"""
@@ -276,9 +363,10 @@ Be decisive and conservative. When in doubt, protect capital."""
             }
     
     async def send_gap_risk_alert_with_ai(self, symbol: str, gap_percent: float, 
-                                         current_price: float, context: Dict = None):
-        """Send gap risk alert and get AI decision"""
-        # Prepare context for AI
+                                         current_price: float, context: Dict = None, 
+                                         enhanced_data: Dict = None):
+        """Send gap risk alert and get AI decision with comprehensive market data"""
+        # Prepare comprehensive context for AI
         ai_context = {
             "symbol": symbol,
             "gap_percent": gap_percent,
@@ -288,6 +376,45 @@ Be decisive and conservative. When in doubt, protect capital."""
             "position_value": context.get("position_value", "unknown") if context else "unknown",
             "account_equity": context.get("account_equity", 2000) if context else 2000
         }
+        
+        # Add enhanced market data if available
+        if enhanced_data:
+            ai_context.update({
+                # Position details
+                "position_qty": enhanced_data.get("position_qty"),
+                "position_avg_cost": enhanced_data.get("position_avg_cost"),
+                "position_current_pnl": enhanced_data.get("position_current_pnl"),
+                "position_pnl_percent": enhanced_data.get("position_pnl_percent"),
+                "days_held": enhanced_data.get("days_held"),
+                
+                # Market context
+                "market_regime": enhanced_data.get("market_regime"),
+                "market_volatility": enhanced_data.get("market_volatility"),
+                "spy_performance_today": enhanced_data.get("spy_performance_today"),
+                "sector_performance": enhanced_data.get("sector_performance"),
+                
+                # Technical analysis
+                "volume_vs_average": enhanced_data.get("volume_vs_average"),
+                "price_vs_ma20": enhanced_data.get("price_vs_ma20"),
+                "rsi": enhanced_data.get("rsi"),
+                "support_level": enhanced_data.get("support_level"),
+                "resistance_level": enhanced_data.get("resistance_level"),
+                
+                # Risk metrics
+                "account_allocation_percent": enhanced_data.get("account_allocation_percent"),
+                "max_loss_from_here": enhanced_data.get("max_loss_from_here"),
+                "correlation_with_market": enhanced_data.get("correlation_with_market"),
+                
+                # Recent news/events
+                "earnings_date": enhanced_data.get("earnings_date"),
+                "news_sentiment": enhanced_data.get("news_sentiment"),
+                "insider_trading": enhanced_data.get("insider_trading"),
+                
+                # Historical context
+                "similar_gaps_outcome": enhanced_data.get("similar_gaps_outcome"),
+                "stock_gap_history": enhanced_data.get("stock_gap_history"),
+                "recovery_probability": enhanced_data.get("recovery_probability")
+            })
         
         # Get AI decision
         if self.ai_enabled:

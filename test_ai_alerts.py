@@ -12,8 +12,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 async def test_ai_gap_risk_decision():
-    """Test AI decision making for gap risk"""
-    print("🧪 Testing AI-powered gap risk alerts...")
+    """Test AI decision making for gap risk with enhanced data"""
+    print("🧪 Testing AI-powered gap risk alerts with comprehensive data...")
     
     # Initialize the alerter
     alerter = CriticalAlerter()
@@ -25,17 +25,56 @@ async def test_ai_gap_risk_decision():
         "account_equity": 1978
     }
     
-    print(f"🤖 Testing AI decision for AMD -7.1% gap...")
+    # Enhanced market data for AI analysis
+    enhanced_data = {
+        # Position details
+        "position_qty": 1.0,
+        "position_avg_cost": 175.50,
+        "position_current_pnl": -12.39,
+        "position_pnl_percent": -7.1,
+        "account_allocation_percent": 8.8,
+        "days_held": "3 days",
+        
+        # Market context
+        "market_regime": "SECTOR_ROTATION",
+        "market_volatility": "LOW",
+        "spy_performance_today": "-0.3%",
+        "sector_performance": "Technology -1.2%",
+        
+        # Technical analysis
+        "volume_vs_average": "2.1x",
+        "price_vs_ma20": "-5.2%",
+        "rsi": "32.4",
+        "support_level": 158.50,
+        "resistance_level": 185.20,
+        
+        # Risk metrics
+        "max_loss_from_here": "8.8%",
+        "correlation_with_market": "high",
+        
+        # News & events
+        "earnings_date": "3 weeks away",
+        "news_sentiment": "mixed",
+        "insider_trading": "none recent",
+        
+        # Historical context
+        "similar_gaps_outcome": "recovered 60% within 2 days",
+        "stock_gap_history": "typically bounces from oversold",
+        "recovery_probability": "moderate-high"
+    }
     
-    # Get AI decision
+    print(f"🤖 Testing AI decision for AMD -7.1% gap with comprehensive data...")
+    
+    # Get AI decision with rich data
     ai_decision = await alerter.send_gap_risk_alert_with_ai(
         symbol="AMD",
         gap_percent=-7.1,
         current_price=163.11,
-        context=test_context
+        context=test_context,
+        enhanced_data=enhanced_data
     )
     
-    print(f"\n✅ AI Decision Result:")
+    print(f"\n✅ Enhanced AI Decision Result:")
     print(f"   Decision: {ai_decision['decision']}")
     print(f"   Reasoning: {ai_decision['reasoning']}")
     print(f"   Confidence: {ai_decision['confidence']:.1%}")
