@@ -1316,7 +1316,7 @@ class IntelligentTradingSystem:
                     context = {
                         "market_session": period,
                         "position_value": alert.get('position_value', 0),
-                        "account_equity": self.performance_tracker.current_equity if hasattr(self, 'performance_tracker') else 2000
+                        "account_equity": 2000  # Will be updated with real data in comprehensive collection
                     }
                     
                     # Gather enhanced market data for AI analysis
@@ -1502,12 +1502,12 @@ class IntelligentTradingSystem:
             try:
                 # Try to place stop loss order
                 stop_order = await self.gateway.submit_order(
-                    symbol=symbol,
                     qty=abs(float(position.qty)),
                     side="sell",
                     type="stop",
                     stop_price=stop_price,
-                    time_in_force="gtc"
+                    time_in_force="gtc",
+                    symbol=symbol
                 )
                 
                 if stop_order:
@@ -1528,16 +1528,29 @@ class IntelligentTradingSystem:
         try:
             self.logger.debug(f"📊 Collecting comprehensive data for {symbol}...")
             
-            # === POSITION DETAILS ===
+            # === ACCOUNT & POSITION DETAILS ===
+            current_equity = 2000  # Default fallback
+            try:
+                # Get current account equity first
+                account = await self.gateway.get_account()
+                if account:
+                    current_equity = float(account.equity)
+                    enhanced_data["account_equity"] = current_equity
+            except Exception as e:
+                self.logger.debug(f"Account data collection failed: {e}")
+            
             try:
                 position = await self.gateway.get_position(symbol)
                 if position and float(position.qty) != 0:
+                    position_value = abs(float(position.market_value))
+                    allocation_percent = (position_value / current_equity * 100) if current_equity > 0 else 0
+                    
                     enhanced_data.update({
                         "position_qty": float(position.qty),
                         "position_avg_cost": float(position.avg_entry_price),
                         "position_current_pnl": float(position.unrealized_pl),
                         "position_pnl_percent": (float(position.unrealized_plpc) * 100),
-                        "account_allocation_percent": (float(position.market_value) / self.performance_tracker.current_equity * 100) if hasattr(self, 'performance_tracker') else 0
+                        "account_allocation_percent": allocation_percent
                     })
             except Exception as e:
                 self.logger.debug(f"Position data collection failed for {symbol}: {e}")
@@ -1613,7 +1626,7 @@ class IntelligentTradingSystem:
                 if "position_current_pnl" in enhanced_data and "account_allocation_percent" in enhanced_data:
                     # Calculate maximum potential loss from current position
                     current_position_value = enhanced_data.get("position_qty", 0) * enhanced_data.get("position_avg_cost", 0)
-                    max_loss_percent = (current_position_value / (self.performance_tracker.current_equity if hasattr(self, 'performance_tracker') else 2000)) * 100
+                    max_loss_percent = (current_position_value / current_equity) * 100
                     enhanced_data["max_loss_from_here"] = f"{max_loss_percent:.1f}%"
                 
                 # Estimate correlation with SPY (simplified)
