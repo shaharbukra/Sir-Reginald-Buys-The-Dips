@@ -1683,6 +1683,14 @@ class IntelligentTradingSystem:
             # Close components in reverse order of initialization
             shutdown_tasks = []
             
+            # Generate final performance report BEFORE closing API gateway
+            try:
+                self.logger.info("📊 Generating final performance report...")
+                final_report = await self.performance_tracker.generate_final_report()
+                self.logger.info(f"📊 FINAL PERFORMANCE: {json.dumps(final_report, indent=2)}")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Final report generation failed: {e}")
+            
             # Close AI assistant
             if self.ai_assistant:
                 try:
@@ -1690,7 +1698,7 @@ class IntelligentTradingSystem:
                 except Exception as shutdown_error:
                     self.logger.warning(f"⚠️ AI ASSISTANT SHUTDOWN WARNING: {shutdown_error}")
                 
-            # Close API gateway
+            # Close API gateway AFTER final report
             if self.gateway:
                 shutdown_tasks.append(self.gateway.shutdown())
                 
@@ -1704,13 +1712,6 @@ class IntelligentTradingSystem:
             # Wait for all shutdown tasks to complete
             if shutdown_tasks:
                 await asyncio.gather(*shutdown_tasks, return_exceptions=True)
-            
-            # Generate final performance report
-            try:
-                final_report = await self.performance_tracker.generate_final_report()
-                self.logger.info(f"📊 FINAL PERFORMANCE: {json.dumps(final_report, indent=2)}")
-            except Exception as e:
-                self.logger.warning(f"⚠️ Final report generation failed: {e}")
             
             self.logger.info("✅ SYSTEM SHUTDOWN COMPLETE")
             

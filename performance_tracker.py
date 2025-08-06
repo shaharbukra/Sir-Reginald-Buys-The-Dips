@@ -190,9 +190,28 @@ class PerformanceTracker:
     async def generate_final_report(self) -> Dict:
         """Generate comprehensive final performance report using REAL data"""
         try:
-            # Get final performance summary
-            daily_summary = await self.get_daily_summary()
-            positions_summary = await self.get_positions_summary()
+            # Try to get final performance summary, but use cached data if API gateway is closed
+            try:
+                daily_summary = await self.get_daily_summary()
+            except Exception as e:
+                logger.warning(f"⚠️ Could not get fresh data for final report, using cached: {e}")
+                daily_summary = self.performance_cache.copy() if self.performance_cache else {
+                    'current_equity': self.session_start_value or 2000,
+                    'daily_pnl': 0.0,
+                    'daily_pnl_pct': 0.0,
+                    'total_pnl': 0.0,
+                    'total_pnl_pct': 0.0
+                }
+            
+            try:
+                positions_summary = await self.get_positions_summary()
+            except Exception as e:
+                logger.warning(f"⚠️ Could not get position data for final report: {e}")
+                positions_summary = {
+                    'total_positions': 0,
+                    'total_position_value': 0.0,
+                    'total_unrealized_pnl': 0.0
+                }
             
             # Calculate session performance
             session_pnl = 0.0
