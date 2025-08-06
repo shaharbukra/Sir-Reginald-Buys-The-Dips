@@ -65,7 +65,7 @@ class IntelligentTradingSystem:
         self.order_executor = SimpleTradeExecutor(self.gateway, self.risk_manager)
         # Note: PDT manager will be linked after initialization
         self.performance_tracker = None  # Will be initialized after gateway
-        self.corporate_actions_filter = CorporateActionsFilter()  # CRITICAL: Corporate actions protection
+        self.corporate_actions_filter = CorporateActionsFilter()
         self.alerter = CriticalAlerter()  # CRITICAL: Emergency alerting system
         self.pdt_manager = PDTManager()  # CRITICAL: PDT rule compliance
         self.gap_risk_manager = GapRiskManager()  # CRITICAL: Extended hours gap protection
