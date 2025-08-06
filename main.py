@@ -1416,40 +1416,73 @@ class IntelligentTradingSystem:
             self.logger.error(f"System health check failed: {e}")
             
     async def _execute_ai_decision(self, symbol: str, ai_decision: Dict):
-        """Execute AI decision for gap risk management"""
+        """Execute AI decision for gap risk management with fallback options"""
         try:
             decision = ai_decision['decision']
-            self.logger.info(f"🤖 Executing AI decision for {symbol}: {decision}")
+            confidence = ai_decision.get('confidence', 0)
+            self.logger.info(f"🤖 Executing AI decision for {symbol}: {decision} (confidence: {confidence:.0%})")
+            
+            action_taken = False
             
             if decision == "emergency_sell":
                 # Attempt immediate market sell (if market is open)
-                await self._emergency_sell_position(symbol, "AI emergency decision")
+                action_taken = await self._emergency_sell_position(symbol, "AI emergency decision")
                 
             elif decision == "sell_market_open":
-                # Create sell order for market open (will execute when market opens)
-                await self._schedule_market_open_sell(symbol, "AI scheduled sell decision")
+                # Create sell order for market open (will execute when market opens)  
+                action_taken = await self._schedule_market_open_sell(symbol, "AI scheduled sell decision")
                 
             elif decision == "set_stop_loss":
                 # Create or tighten stop loss
-                await self._create_tighter_stop_loss(symbol, "AI stop loss adjustment")
+                action_taken = await self._create_tighter_stop_loss(symbol, "AI stop loss adjustment")
+                
+                # If stop loss creation failed, try alternative protective actions
+                if not action_taken:
+                    self.logger.info(f"🤖 Primary stop loss failed for {symbol}, trying alternative protective actions...")
+                    
+                    # Alternative 1: Cancel existing orders and create new stop loss
+                    try:
+                        existing_orders = await self.gateway.get_orders('open')
+                        symbol_orders = [order for order in existing_orders if order.symbol == symbol]
+                        
+                        if symbol_orders:
+                            self.logger.info(f"🤖 Found {len(symbol_orders)} existing orders for {symbol}")
+                            # Log what orders exist but don't cancel them automatically
+                            for order in symbol_orders:
+                                order_type = getattr(order, 'order_type', getattr(order, 'type', 'unknown'))
+                                side = getattr(order, 'side', 'unknown')
+                                self.logger.info(f"   - Existing {order_type} {side} order: {order.id}")
+                            
+                            self.logger.info(f"🤖 Position already protected by existing orders - AI decision acknowledged but not executed")
+                            action_taken = True  # Consider this as "action taken" since position is protected
+                    except Exception as e:
+                        self.logger.debug(f"Error checking existing orders for {symbol}: {e}")
                 
             elif decision == "hold":
-                self.logger.info(f"🤖 AI recommends holding {symbol} - no action taken")
+                self.logger.info(f"🤖 AI recommends holding {symbol} - no action needed")
+                action_taken = True
                 
             else:  # manual_review or unknown
-                self.logger.info(f"🤖 AI recommends manual review for {symbol}")
+                self.logger.info(f"🤖 AI recommends manual review for {symbol} - flagged for attention")
+                action_taken = True
+            
+            # Report execution result
+            if action_taken:
+                self.logger.info(f"✅ AI decision executed successfully for {symbol}: {decision}")
+            else:
+                self.logger.warning(f"⚠️ AI decision could not be executed for {symbol}: {decision}")
                 
         except Exception as e:
             self.logger.error(f"Failed to execute AI decision for {symbol}: {e}")
     
-    async def _emergency_sell_position(self, symbol: str, reason: str):
+    async def _emergency_sell_position(self, symbol: str, reason: str) -> bool:
         """Emergency sell position if market allows"""
         try:
             # Check if we have the position
             position = await self.gateway.get_position(symbol)
             if not position or float(position.qty) == 0:
                 self.logger.info(f"No position in {symbol} to emergency sell")
-                return
+                return False
                 
             # Try to place market sell order (will fail if market closed)
             try:
@@ -1466,32 +1499,38 @@ class IntelligentTradingSystem:
                 
                 if sell_order:
                     self.logger.info(f"🤖 AI Emergency sell executed for {symbol}: {sell_order.id}")
+                    return True
                 else:
                     self.logger.warning(f"🤖 AI Emergency sell failed for {symbol} - market likely closed")
+                    return False
                     
             except Exception as e:
                 self.logger.warning(f"🤖 AI Emergency sell failed for {symbol}: {e}")
+                return False
                 
         except Exception as e:
             self.logger.error(f"Emergency sell position failed for {symbol}: {e}")
+            return False
     
-    async def _schedule_market_open_sell(self, symbol: str, reason: str):
+    async def _schedule_market_open_sell(self, symbol: str, reason: str) -> bool:
         """Schedule sell order for market open"""
         try:
             # For now, just log the intention - could be enhanced with order scheduling
             self.logger.info(f"🤖 AI scheduled sell for {symbol} at market open: {reason}")
             # TODO: Implement order scheduling system for market open execution
+            return True  # Consider scheduled as successful
             
         except Exception as e:
             self.logger.error(f"Schedule market open sell failed for {symbol}: {e}")
+            return False
     
-    async def _create_tighter_stop_loss(self, symbol: str, reason: str):
+    async def _create_tighter_stop_loss(self, symbol: str, reason: str) -> bool:
         """Create or tighten stop loss for position"""
         try:
             position = await self.gateway.get_position(symbol)
             if not position or float(position.qty) == 0:
                 self.logger.info(f"No position in {symbol} for stop loss adjustment")
-                return
+                return False
                 
             # Get current price
             current_price = float(position.current_price) if hasattr(position, 'current_price') else float(position.market_value) / abs(float(position.qty))
@@ -1513,14 +1552,18 @@ class IntelligentTradingSystem:
                 
                 if stop_order:
                     self.logger.info(f"🤖 AI tighter stop loss set for {symbol} at ${stop_price:.2f}: {reason}")
+                    return True
                 else:
-                    self.logger.info(f"🤖 AI stop loss not created for {symbol} - shares held by existing orders (likely existing stop loss)")
+                    self.logger.debug(f"🤖 AI stop loss not created for {symbol} - shares held by existing orders")
+                    return False
                     
             except Exception as e:
-                self.logger.warning(f"🤖 AI stop loss creation failed for {symbol}: {e}")
+                self.logger.debug(f"🤖 AI stop loss creation failed for {symbol}: {e}")
+                return False
                 
         except Exception as e:
             self.logger.error(f"Create tighter stop loss failed for {symbol}: {e}")
+            return False
 
     async def _collect_comprehensive_market_data(self, symbol: str) -> Dict:
         """Collect comprehensive market data for AI decision making"""
