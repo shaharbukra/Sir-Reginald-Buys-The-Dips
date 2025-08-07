@@ -85,6 +85,9 @@ class IntelligentTradingSystem:
             'system_uptime_start': datetime.now()
         }
         
+        # Warning suppression tracking
+        self.extended_hours_warnings_sent = set()  # Track symbols already warned about
+        
     def _setup_logging(self):
         """Setup comprehensive structured logging"""
         logging.basicConfig(
@@ -170,6 +173,12 @@ class IntelligentTradingSystem:
             
             # Reset PDT blocks for new trading day
             self.gateway.reset_pdt_blocks()
+            
+            # Reset gap risk alert tracking for new trading day
+            self.gap_risk_manager.reset_alert_tracking()
+            
+            # Reset extended hours warning tracking for new session
+            self.extended_hours_warnings_sent.clear()
             
             # Validate market access
             should_trade, reason = await self.market_status.should_start_trading()
@@ -1300,39 +1309,55 @@ class IntelligentTradingSystem:
                     except Exception as quote_error:
                         self.logger.debug(f"Could not get extended hours quote for {symbol}: {quote_error}")
                     
-                    # Check for positions approaching dangerous loss levels
+                    # Check for positions approaching dangerous loss levels (with suppression)
                     if unrealized_pct < -7:  # Approaching our -8% stop loss
-                        self.logger.warning(f"⚠️ EXTENDED HOURS RISK: {symbol} at {unrealized_pct:.1f}% loss")
+                        warning_key = f"{symbol}_{int(unrealized_pct)}"  # Key includes symbol and loss percentage
+                        if warning_key not in self.extended_hours_warnings_sent:
+                            self.logger.warning(f"⚠️ EXTENDED HOURS RISK: {symbol} at {unrealized_pct:.1f}% loss")
+                            self.extended_hours_warnings_sent.add(warning_key)
+                        else:
+                            self.logger.debug(f"🔇 Extended hours risk warning suppressed for {symbol} (already warned)")
                         
                 except Exception as pos_error:
                     self.logger.error(f"Extended hours monitoring failed for {position.symbol}: {pos_error}")
             
-            # Send alerts for significant gap moves with AI decision making
+            # Send alerts for significant gap moves with AI decision making (with deduplication)
             if gap_risk_alerts:
                 for alert in gap_risk_alerts:
-                    self.logger.critical(f"🚨 GAP RISK: {alert['symbol']} moved {alert['move_pct']:+.1f}% to ${alert['current_price']:.2f} in {period}")
-                    
-                    # Collect comprehensive data for AI decision
-                    context = {
-                        "market_session": period,
-                        "position_value": alert.get('position_value', 0),
-                        "account_equity": 2000  # Will be updated with real data in comprehensive collection
-                    }
-                    
-                    # Gather enhanced market data for AI analysis
-                    enhanced_data = await self._collect_comprehensive_market_data(alert['symbol'])
-                    
-                    ai_decision = await self.alerter.send_gap_risk_alert_with_ai(
-                        alert['symbol'], 
-                        alert['move_pct'], 
-                        alert['current_price'],
-                        context,
-                        enhanced_data
+                    # Create gap risk alert object for deduplication check
+                    gap_alert = self.gap_risk_manager.calculate_gap_risk(
+                        alert['symbol'],
+                        alert['current_price']
                     )
                     
-                    # Execute AI decision if confident and actionable
-                    if ai_decision['confidence'] > 0.7 and ai_decision['decision'] != 'manual_review':
-                        await self._execute_ai_decision(alert['symbol'], ai_decision)
+                    # Only proceed if this alert should be sent (prevents spam)
+                    if gap_alert and self.gap_risk_manager.should_alert_gap_risk(gap_alert):
+                        self.logger.critical(f"🚨 GAP RISK: {alert['symbol']} moved {alert['move_pct']:+.1f}% to ${alert['current_price']:.2f} in {period}")
+                        
+                        # Collect comprehensive data for AI decision
+                        context = {
+                            "market_session": period,
+                            "position_value": alert.get('position_value', 0),
+                            "account_equity": 2000  # Will be updated with real data in comprehensive collection
+                        }
+                        
+                        # Gather enhanced market data for AI analysis
+                        enhanced_data = await self._collect_comprehensive_market_data(alert['symbol'])
+                        
+                        ai_decision = await self.alerter.send_gap_risk_alert_with_ai(
+                            alert['symbol'], 
+                            alert['move_pct'], 
+                            alert['current_price'],
+                            context,
+                            enhanced_data
+                        )
+                        
+                        # Execute AI decision if confident and actionable
+                        if ai_decision['confidence'] > 0.7 and ai_decision['decision'] != 'manual_review':
+                            await self._execute_ai_decision(alert['symbol'], ai_decision)
+                    else:
+                        # Log suppressed alerts at debug level to avoid spam
+                        self.logger.debug(f"🔇 Gap risk alert suppressed for {alert['symbol']} (already alerted or insufficient threshold)")
             
             # Sleep for 5 minutes before next extended hours check
             self.logger.debug(f"🔄 Extended hours monitoring cycle complete - sleeping 5 minutes")

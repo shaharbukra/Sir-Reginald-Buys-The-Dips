@@ -119,6 +119,16 @@ class GapRiskManager:
             logger.error(f"Gap alert decision failed: {e}")
             return False
     
+    def reset_alert_tracking(self):
+        """Reset alert tracking for new trading session"""
+        try:
+            alerts_cleared = len(self.gap_alerts_sent)
+            self.gap_alerts_sent.clear()
+            if alerts_cleared > 0:
+                logger.info(f"🔄 Reset {alerts_cleared} gap risk alert suppressions for new trading session")
+        except Exception as e:
+            logger.error(f"Failed to reset alert tracking: {e}")
+    
     def get_portfolio_gap_exposure(self) -> Dict:
         """Get overall portfolio gap risk exposure"""
         try:
