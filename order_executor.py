@@ -43,20 +43,10 @@ class SimpleTradeExecutor:
                 logger.warning(f"❌ Risk validation failed for {signal.symbol}")
                 return False
             
-            # PDT compliance check (if PDT manager is available)
-            if self.pdt_manager:
-                can_trade, pdt_reason = await self.pdt_manager.check_pdt_compliance_before_trade(
-                    signal.symbol, signal.action, quantity
-                )
-                if not can_trade:
-                    logger.warning(f"❌ PDT compliance failed for {signal.symbol}: {pdt_reason}")
-                    await self.alerter.send_pdt_violation_alert(
-                        f"Trade blocked for {signal.symbol}: {pdt_reason}"
-                    )
-                    return False
-                elif "WARNING" in pdt_reason or "Day trade" in pdt_reason:
-                    logger.warning(f"⚠️ PDT warning for {signal.symbol}: {pdt_reason}")
-                
+            # POSITION SIZING - Calculate quantity first for PDT compliance check
+            # Initialize quantity variable to avoid reference errors
+            quantity = 0
+            
             # ATR-BASED POSITION SIZING (Gemini's excellent suggestion)
             # Risk the same dollar amount per trade by adjusting for volatility
             if hasattr(signal, 'atr') and signal.atr and signal.atr > 0:
@@ -99,7 +89,23 @@ class SimpleTradeExecutor:
                     logger.warning(f"❌ Cannot afford {signal.symbol} at ${signal.entry_price:.2f}")
                     logger.warning(f"Need ${one_share_cost:.2f}, max allowed ${max_for_expensive_stock:.2f}")
                     return False
-            elif quantity > 100:  # Safety check for very large quantities
+                    
+            # PDT compliance check (now that quantity is properly calculated)
+            if self.pdt_manager:
+                can_trade, pdt_reason = await self.pdt_manager.check_pdt_compliance_before_trade(
+                    signal.symbol, signal.action, quantity
+                )
+                if not can_trade:
+                    logger.warning(f"❌ PDT compliance failed for {signal.symbol}: {pdt_reason}")
+                    await self.alerter.send_pdt_violation_alert(
+                        f"Trade blocked for {signal.symbol}: {pdt_reason}"
+                    )
+                    return False
+                elif "WARNING" in pdt_reason or "Day trade" in pdt_reason:
+                    logger.warning(f"⚠️ PDT warning for {signal.symbol}: {pdt_reason}")
+                    
+            # Additional quantity safety checks
+            if quantity > 100:  # Safety check for very large quantities
                 logger.warning(f"⚠️ Large quantity {quantity} for {signal.symbol} - double checking...")
                 if position_value > account_value * 0.1:  # More than 10% of account
                     logger.error(f"❌ Position too large: ${position_value:.2f} (>{account_value * 0.1:.2f})")

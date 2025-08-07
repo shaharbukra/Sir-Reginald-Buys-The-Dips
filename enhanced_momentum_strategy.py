@@ -779,16 +779,22 @@ class EventDrivenMomentumStrategy:
             current_price = df['close'].iloc[-1]
             
             # Mean reversion criteria: oversold conditions with support
+            # Safely extract scalar values from indicators
             rsi = indicators.get('rsi')
+            rsi_val = rsi.iloc[-1] if hasattr(rsi, 'iloc') and len(rsi) > 0 else None
+            
             bollinger_position = indicators.get('bb_position', 0.5)
-            ma_20 = indicators.get('ma_20', current_price)
+            bb_pos_val = bollinger_position.iloc[-1] if hasattr(bollinger_position, 'iloc') else bollinger_position
+            
+            ma_20 = indicators.get('ma_20')
+            ma_20_val = ma_20.iloc[-1] if hasattr(ma_20, 'iloc') else (ma_20 if ma_20 is not None else current_price)
             
             # Look for oversold bounce opportunities
             oversold_criteria = [
-                rsi < 35 if rsi else False,  # Oversold RSI
-                bollinger_position < 0.2,    # Near lower Bollinger Band
-                current_price < ma_20 * 0.98, # Below 20-day MA
-                df['volume'].iloc[-1] > df['volume'].iloc[-5:-1].mean() * 1.2  # Volume confirmation
+                rsi_val < 35 if rsi_val is not None else False,  # Oversold RSI
+                bb_pos_val < 0.2,    # Near lower Bollinger Band
+                current_price < ma_20_val * 0.98, # Below 20-day MA
+                bool(df['volume'].iloc[-1] > df['volume'].iloc[-5:-1].mean() * 1.2)  # Volume confirmation (explicit bool)
             ]
             
             criteria_met = sum(oversold_criteria)
@@ -820,11 +826,17 @@ class EventDrivenMomentumStrategy:
             recent_low = df['low'].iloc[-20:].min()    # 20-day low
             
             # Breakout criteria: breaking above resistance with volume
+            # Safely extract scalar values from indicators
+            rsi_val = indicators.get('rsi')
+            rsi_val = rsi_val.iloc[-1] if hasattr(rsi_val, 'iloc') else (rsi_val if rsi_val is not None else 50)
+            ma_20_val = indicators.get('ma_20')
+            ma_20_val = ma_20_val.iloc[-1] if hasattr(ma_20_val, 'iloc') else (ma_20_val if ma_20_val is not None else current_price)
+            
             breakout_criteria = [
                 current_price > recent_high * 1.005,  # Breaking recent high
-                df['volume'].iloc[-1] > df['volume'].iloc[-10:].mean() * 1.5,  # High volume
-                indicators.get('rsi', 50) > 55,  # Momentum confirmation
-                current_price > indicators.get('ma_20', current_price)  # Above trend
+                bool(df['volume'].iloc[-1] > df['volume'].iloc[-10:].mean() * 1.5),  # High volume (explicit bool)
+                rsi_val > 55,  # Momentum confirmation
+                current_price > ma_20_val  # Above trend
             ]
             
             criteria_met = sum(breakout_criteria)
@@ -855,12 +867,22 @@ class EventDrivenMomentumStrategy:
             current_price = df['close'].iloc[-1]
             
             # Very strict criteria for defensive trading
+            # Safely extract scalar values from indicators
+            rsi = indicators.get('rsi', 50)
+            rsi_val = rsi.iloc[-1] if hasattr(rsi, 'iloc') else rsi
+            
+            ma_20 = indicators.get('ma_20', 0)
+            ma_20_val = ma_20.iloc[-1] if hasattr(ma_20, 'iloc') else ma_20
+            
+            bb_position = indicators.get('bb_position', 0.5)
+            bb_pos_val = bb_position.iloc[-1] if hasattr(bb_position, 'iloc') else bb_position
+            
             defensive_criteria = [
-                indicators.get('rsi', 50) > 60 and indicators.get('rsi', 50) < 75,  # Strong but not overbought
-                current_price > indicators.get('ma_20', 0) * 1.02,  # Well above trend
-                df['volume'].iloc[-1] > df['volume'].iloc[-10:].mean() * 2.0,  # Very high volume
-                df['close'].iloc[-3:].is_monotonic_increasing,  # 3 consecutive up days
-                indicators.get('bb_position', 0.5) > 0.6  # Upper part of Bollinger Bands
+                rsi_val > 60 and rsi_val < 75,  # Strong but not overbought
+                current_price > ma_20_val * 1.02,  # Well above trend
+                bool(df['volume'].iloc[-1] > df['volume'].iloc[-10:].mean() * 2.0),  # Very high volume (explicit bool)
+                bool(df['close'].iloc[-3:].is_monotonic_increasing),  # 3 consecutive up days (explicit bool)
+                bb_pos_val > 0.6  # Upper part of Bollinger Bands
             ]
             
             criteria_met = sum(defensive_criteria)
