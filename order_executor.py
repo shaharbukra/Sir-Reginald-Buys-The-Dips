@@ -229,7 +229,22 @@ class SimpleTradeExecutor:
     async def _execute_bracket_order(self, signal, quantity: int) -> bool:
         """Execute bracket order with main order, stop loss, and take profit"""
         try:
-            # Main order (market buy)
+            # Main order (market buy) with Alpaca-compliant pricing
+            # Ensure stop loss is at least $0.01 below entry price and take profit is at least $0.01 above
+            entry_price = signal.entry_price
+            
+            # Calculate compliant prices
+            min_stop_price = entry_price - 0.01
+            max_take_profit = entry_price + 0.01
+            
+            # Ensure our prices meet minimum requirements
+            compliant_stop_price = min(signal.stop_loss_price, min_stop_price)
+            compliant_take_profit = max(signal.take_profit_price, max_take_profit)
+            
+            # Round to 2 decimal places
+            compliant_stop_price = round(compliant_stop_price, 2)
+            compliant_take_profit = round(compliant_take_profit, 2)
+            
             main_order_data = {
                 'symbol': signal.symbol,
                 'qty': str(quantity),
@@ -238,12 +253,18 @@ class SimpleTradeExecutor:
                 'time_in_force': 'day',
                 'order_class': 'bracket',
                 'stop_loss': {
-                    'stop_price': str(round(signal.stop_loss_price, 2))
+                    'stop_price': str(compliant_stop_price)
                 },
                 'take_profit': {
-                    'limit_price': str(round(signal.take_profit_price, 2))
+                    'limit_price': str(compliant_take_profit)
                 }
             }
+            
+            # Log price adjustments if any were made
+            if compliant_stop_price != round(signal.stop_loss_price, 2):
+                logger.info(f"📊 {signal.symbol} stop price adjusted: ${signal.stop_loss_price:.2f} → ${compliant_stop_price:.2f} (Alpaca compliance)")
+            if compliant_take_profit != round(signal.take_profit_price, 2):
+                logger.info(f"📊 {signal.symbol} take profit adjusted: ${signal.take_profit_price:.2f} → ${compliant_take_profit:.2f} (Alpaca compliance)")
             
             # Submit bracket order
             order_response = await self.gateway.submit_order(main_order_data)
@@ -1159,6 +1180,9 @@ class SimpleTradeExecutor:
                             elif order_status == 'cancelled' or order_status == 'rejected':
                                 logger.error(f"❌ {symbol}: Main order {order_status} - verification failed")
                                 break
+                            elif order_status == 'accepted' and (datetime.now() - monitoring_start).total_seconds() > 30:
+                                # Order has been accepted for 30+ seconds but not filled - likely won't fill
+                                logger.warning(f"⏳ {symbol}: Order accepted for 30+ seconds without fill - may not execute")
                             else:
                                 logger.debug(f"⏳ {symbol}: Order status {order_status}, continuing monitoring...")
                         else:
@@ -1177,6 +1201,21 @@ class SimpleTradeExecutor:
                 return True
             else:
                 logger.critical(f"🚨 ENHANCED POST-FILL VERIFICATION FAILED for {symbol} after {max_monitoring_time}s monitoring")
+                
+                # Check if failure is due to order not filling vs other issues
+                order_never_filled = False
+                if symbol in self.active_orders:
+                    order_id = self.active_orders[symbol]['main_order_id']
+                    try:
+                        order_details = await self.gateway.get_order_by_id(order_id)
+                        if order_details:
+                            filled_qty = float(getattr(order_details, 'filled_qty', 0))
+                            order_status = getattr(order_details, 'status', 'unknown')
+                            if filled_qty == 0 and order_status == 'accepted':
+                                order_never_filled = True
+                                logger.critical(f"📊 {symbol} verification failed because order never filled (status: {order_status})")
+                    except Exception as e:
+                        logger.error(f"Error checking order status for {symbol}: {e}")
                 
                 # Critical safety measure: Create emergency protective orders
                 emergency_protection_success = await self._create_emergency_protection(symbol, signal, quantity)
@@ -1306,12 +1345,47 @@ class SimpleTradeExecutor:
         try:
             logger.critical(f"🚨 Creating comprehensive emergency protection for {symbol}")
             
+            # FIRST: Verify we actually have a position to protect
+            positions = await self.gateway.get_all_positions()
+            actual_position = None
+            
+            for pos in positions:
+                if pos.symbol == symbol and float(pos.qty) != 0:
+                    actual_position = pos
+                    break
+            
+            if not actual_position:
+                logger.critical(f"⚠️ No position found for {symbol} - emergency protection not needed")
+                logger.critical(f"📊 This indicates the order may not have filled or was rejected")
+                
+                # Cancel any pending orders for this symbol to clean up state
+                try:
+                    open_orders = await self.gateway.get_orders('open')
+                    orders_cancelled = 0
+                    for order in open_orders:
+                        if hasattr(order, 'symbol') and order.symbol == symbol:
+                            cancel_response = await self.gateway.cancel_order(order.id)
+                            if cancel_response:
+                                orders_cancelled += 1
+                                logger.info(f"🧹 Cancelled pending order for {symbol}: {order.id}")
+                    
+                    if orders_cancelled > 0:
+                        logger.info(f"🧹 Cleaned up {orders_cancelled} pending orders for {symbol}")
+                        
+                except Exception as cleanup_error:
+                    logger.error(f"Failed to clean up orders for {symbol}: {cleanup_error}")
+                
+                return True  # No position means no risk, so emergency protection is technically successful
+            
+            actual_qty = abs(int(float(actual_position.qty)))
+            logger.critical(f"📊 Found {symbol} position: {actual_qty} shares - creating protection")
+            
             protection_orders_created = 0
             
             # 1. Emergency stop loss (most critical)
             emergency_stop_data = {
                 'symbol': symbol,
-                'qty': str(quantity),
+                'qty': str(actual_qty),  # Use actual position quantity, not intended quantity
                 'side': 'sell',
                 'type': 'stop',
                 'stop_price': str(round(signal.stop_loss_price, 2)),
@@ -1329,7 +1403,7 @@ class SimpleTradeExecutor:
             try:
                 emergency_profit_data = {
                     'symbol': symbol,
-                    'qty': str(quantity),
+                    'qty': str(actual_qty),  # Use actual position quantity, not intended quantity
                     'side': 'sell',
                     'type': 'limit',
                     'limit_price': str(round(signal.take_profit_price, 2)),
