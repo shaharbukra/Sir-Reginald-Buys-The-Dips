@@ -731,6 +731,18 @@ class SimpleTradeExecutor:
         try:
             logger.critical(f"🚨 Creating EMERGENCY stop loss for {symbol}")
             
+            # FIRST: Check if stop loss already exists
+            open_orders = await self.gateway.get_orders(status='open')
+            existing_stops = [order for order in open_orders if order.symbol == symbol and 
+                            order.side == 'sell' and getattr(order, 'stop_price', None)]
+            
+            if existing_stops:
+                logger.critical(f"✅ EMERGENCY STOP AVOIDED: {symbol} already has {len(existing_stops)} stop loss orders")
+                for stop in existing_stops:
+                    stop_price = getattr(stop, 'stop_price', 'unknown')
+                    logger.critical(f"   - Stop loss: {stop.qty} shares @ ${stop_price}")
+                return True  # Stop loss already exists
+            
             emergency_stop_data = {
                 'symbol': symbol,
                 'qty': str(int(filled_qty)),
@@ -746,11 +758,17 @@ class SimpleTradeExecutor:
                 logger.critical(f"✅ Emergency stop loss created: {symbol} @ ${signal.stop_loss_price:.2f}")
                 return True
             else:
+                # Enhanced error logging - let's see WHY this is failing
                 logger.critical(f"❌ Failed to create emergency stop loss for {symbol}")
+                logger.critical(f"   Stop loss details: {emergency_stop_data}")
+                logger.critical(f"   Signal stop price: ${signal.stop_loss_price:.2f}")
+                logger.critical(f"   Filled quantity: {filled_qty}")
+                
                 await self.alerter.send_position_safety_alert(
                     symbol,
                     "Failed to create emergency stop loss",
-                    f"Unable to create protective stop loss at ${signal.stop_loss_price:.2f}"
+                    f"Unable to create protective stop loss at ${signal.stop_loss_price:.2f}. "
+                    f"Details: {emergency_stop_data}"
                 )
                 return False
                 
@@ -762,6 +780,20 @@ class SimpleTradeExecutor:
         """Enhanced emergency liquidation with retry logic for broker state issues"""
         try:
             logger.critical(f"🚨 EMERGENCY LIQUIDATION: {symbol}")
+            
+            # FIRST: Check if position is already protected by existing orders
+            open_orders = await self.gateway.get_orders(status='open')
+            protective_orders = [order for order in open_orders if order.symbol == symbol and order.side == 'sell']
+            
+            if protective_orders:
+                logger.critical(f"✅ EMERGENCY LIQUIDATION AVOIDED: {symbol} already has {len(protective_orders)} protective sell orders")
+                for order in protective_orders:
+                    order_type = getattr(order, 'order_type', 'unknown')
+                    stop_price = getattr(order, 'stop_price', None)
+                    limit_price = getattr(order, 'limit_price', None)
+                    price_str = f"@ ${stop_price}" if stop_price else f"@ ${limit_price}" if limit_price else ""
+                    logger.critical(f"   - {order_type} order: {order.qty} shares {price_str}")
+                return True  # Position is protected
             
             # Get current position
             positions = await self.gateway.get_all_positions()
