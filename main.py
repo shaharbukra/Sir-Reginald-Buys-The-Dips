@@ -1800,8 +1800,8 @@ class IntelligentTradingSystem:
         except Exception as e:
             self.logger.error(f"Graceful shutdown error: {e}")
         finally:
-            # Give the event loop time to finish cleanup
-            await asyncio.sleep(0.1)
+            # Give the event loop and aiohttp more time to finish cleanup
+            await asyncio.sleep(0.5)
     
     async def test_tiered_analysis_with_hot_stocks(self):
         """

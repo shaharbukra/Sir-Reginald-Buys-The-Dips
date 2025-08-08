@@ -66,8 +66,12 @@ class SupplementalDataProvider:
         
     async def shutdown(self):
         """Clean shutdown"""
-        if self.session:
-            await self.session.close()
+        try:
+            if self.session and not self.session.closed:
+                await self.session.close()
+                logger.info("✅ Supplemental data provider session closed cleanly")
+        except Exception as e:
+            logger.warning(f"⚠️ Supplemental data provider shutdown warning: {e}")
             
     async def get_historical_data(self, symbol: str, days: int = 30, min_bars: int = 10) -> List[Dict]:
         """
