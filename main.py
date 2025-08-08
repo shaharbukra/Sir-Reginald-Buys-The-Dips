@@ -230,12 +230,41 @@ class IntelligentTradingSystem:
                 
                 # Look for protective stop orders for this position
                 has_stop_protection = False
+                protective_orders = []
                 
                 for order in open_orders:
-                    if (hasattr(order, 'symbol') and order.symbol == symbol and 
-                        hasattr(order, 'type') and 'stop' in order.type.lower()):
-                        has_stop_protection = True
-                        break
+                    if hasattr(order, 'symbol') and order.symbol == symbol:
+                        order_type = getattr(order, 'type', '').lower()
+                        order_side = getattr(order, 'side', '').lower()
+                        stop_price = getattr(order, 'stop_price', None)
+                        
+                        # Check for protective stop orders (more specific criteria)
+                        is_protective_stop = (
+                            'stop' in order_type or 
+                            stop_price is not None
+                        )
+                        
+                        # Also consider limit orders on opposite side as potential protection (take profit)
+                        is_take_profit = (
+                            order_type == 'limit' and 
+                            ((position_side == 'long' and order_side == 'sell') or
+                             (position_side == 'short' and order_side == 'buy'))
+                        )
+                        
+                        is_protective = is_protective_stop or is_take_profit
+                        
+                        if is_protective:
+                            limit_price = getattr(order, 'limit_price', None)
+                            price_info = f"${stop_price}" if stop_price else f"${limit_price}" if limit_price else "no price"
+                            protection_type = "STOP" if is_protective_stop else "TAKE-PROFIT"
+                            protective_orders.append(f"{protection_type}: {order_type} {order_side} @ {price_info}")
+                            has_stop_protection = True
+                
+                # Log protective orders found (or lack thereof)
+                if protective_orders:
+                    self.logger.info(f"📋 {symbol} protection found: {', '.join(protective_orders)}")
+                else:
+                    self.logger.warning(f"⚠️ {symbol} has NO protective orders")
                 
                 if not has_stop_protection:
                     naked_positions.append({
@@ -301,13 +330,17 @@ class IntelligentTradingSystem:
                         'time_in_force': 'day'
                     }
                     
+                    # Add detailed logging before submission
+                    self.logger.info(f"🔄 Attempting to submit emergency stop for {symbol}: {emergency_stop_data}")
+                    
                     stop_response = await self.gateway.submit_order(emergency_stop_data)
                     
                     if stop_response:
                         self.logger.critical(f"✅ Emergency stop created: {symbol} @ ${stop_price:.2f}")
+                        self.logger.critical(f"   Order ID: {getattr(stop_response, 'id', 'unknown')}")
                         stops_created += 1
                     else:
-                        # Check if it's because shares are held by existing orders or other reason
+                        # Enhanced error diagnosis
                         self.logger.critical(f"❌ Failed to create emergency stop for {symbol}")
                         self.logger.critical(f"   Emergency stop details: {emergency_stop_data}")
                         
@@ -315,7 +348,26 @@ class IntelligentTradingSystem:
                         if self.gateway.is_symbol_pdt_blocked(symbol):
                             self.logger.critical(f"   💡 REASON: {symbol} is PDT-blocked, cannot create stop loss")
                         else:
-                            self.logger.critical(f"   🔍 Need to investigate order failure reason for {symbol}")
+                            # Check market hours and account status
+                            try:
+                                clock = await self.gateway.get_clock()
+                                if clock and hasattr(clock, 'is_open'):
+                                    market_status = "OPEN" if clock.is_open else "CLOSED"
+                                    self.logger.critical(f"   📅 Market status: {market_status}")
+                                else:
+                                    self.logger.critical(f"   📅 Could not determine market status")
+                                    
+                                account = await self.gateway.get_account()
+                                if account:
+                                    self.logger.critical(f"   💰 Account - Cash: ${float(account.cash):.2f}, Buying Power: ${float(account.buying_power):.2f}")
+                                    self.logger.critical(f"   📊 Account status: {getattr(account, 'status', 'unknown')}")
+                                else:
+                                    self.logger.critical(f"   ❌ Could not retrieve account information")
+                                    
+                            except Exception as diag_error:
+                                self.logger.critical(f"   ⚠️ Error during failure diagnosis: {diag_error}")
+                            
+                            self.logger.critical(f"   🔍 Order submission returned None - check API connectivity and permissions")
                             
                         # This position remains unprotected - continue trying other positions
                         
@@ -331,6 +383,20 @@ class IntelligentTradingSystem:
             unprotected_count = len(naked_positions) - stops_created
             if unprotected_count > 0:
                 self.logger.critical(f"🚨 CRITICAL: {unprotected_count} positions remain without stop protection")
+                
+                # CRITICAL DECISION: If all emergency stops failed, consider emergency liquidation
+                if stops_created == 0 and len(naked_positions) > 0:
+                    self.logger.critical(f"⚠️ CONSIDERING EMERGENCY LIQUIDATION: ALL emergency stops failed")
+                    self.logger.critical(f"   This indicates serious API/connectivity issues")
+                    self.logger.critical(f"   Positions are exposed to unlimited risk")
+                    
+                    # For now, just alert - could add emergency liquidation logic here
+                    await self.alerter.send_critical_alert(
+                        "EMERGENCY: All stop protection failed",
+                        f"ALL {len(naked_positions)} emergency stops failed to create. "
+                        f"Positions: {[pos['symbol'] for pos in naked_positions]}. "
+                        f"Manual intervention required immediately!"
+                    )
                 
         except Exception as e:
             self.logger.error(f"Emergency stop creation failed: {e}")
