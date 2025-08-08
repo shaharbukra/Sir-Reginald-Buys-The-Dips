@@ -235,11 +235,13 @@ class SimpleTradeExecutor:
             
             # Calculate compliant prices
             min_stop_price = entry_price - 0.01
-            max_take_profit = entry_price + 0.01
+            min_take_profit = entry_price + 0.01
             
             # Ensure our prices meet minimum requirements
+            # Stop loss: use signal price if it's lower than min_stop_price, otherwise use min_stop_price
             compliant_stop_price = min(signal.stop_loss_price, min_stop_price)
-            compliant_take_profit = max(signal.take_profit_price, max_take_profit)
+            # Take profit: use signal price if it's higher than min_take_profit, otherwise use min_take_profit
+            compliant_take_profit = max(signal.take_profit_price, min_take_profit)
             
             # Round to 2 decimal places
             compliant_stop_price = round(compliant_stop_price, 2)
@@ -716,18 +718,21 @@ class SimpleTradeExecutor:
                     
                     order_type = getattr(order, 'type', '')
                     order_class = getattr(order, 'order_class', '')
+                    stop_price = getattr(order, 'stop_price', None)
+                    limit_price = getattr(order, 'limit_price', None)
                     
-                    if 'stop' in order_type.lower() or 'stop' in order_class.lower():
+                    logger.info(f"📋 Found child order: {symbol} {order_type} (class: {order_class}) stop_price: {stop_price} limit_price: {limit_price}")
+                    
+                    # Check for stop loss orders (stop or stop_limit types)
+                    if order_type.lower() in ['stop', 'stop_limit'] or stop_price is not None:
                         stop_loss_found = True
-                        logger.info(f"✅ Stop loss leg found for {symbol}")
-                    elif ('limit' in order_type.lower() and 
-                          ('profit' in order_class.lower() or 'take_profit' in order_class.lower())):
+                        logger.info(f"✅ Stop loss leg found for {symbol}: {order_type} @ ${stop_price}")
+                    # Check for take profit orders (limit orders with higher price than current)
+                    elif order_type.lower() == 'limit' and limit_price is not None:
                         take_profit_found = True
-                        logger.info(f"✅ Take profit leg found for {symbol}")
-                    elif order_type.lower() == 'limit' and not stop_loss_found:
-                        # Assume remaining limit order is take profit if stop loss not yet found
-                        take_profit_found = True
-                        logger.info(f"✅ Take profit leg found for {symbol} (limit order)")
+                        logger.info(f"✅ Take profit leg found for {symbol}: {order_type} @ ${limit_price}")
+                    else:
+                        logger.warning(f"⚠️ Unknown child order type for {symbol}: {order_type} (class: {order_class})")
             
             if stop_loss_found and take_profit_found:
                 return True
@@ -779,11 +784,23 @@ class SimpleTradeExecutor:
                 logger.critical(f"✅ Emergency stop loss created: {symbol} @ ${signal.stop_loss_price:.2f}")
                 return True
             else:
-                # Enhanced error logging - let's see WHY this is failing
+                # Enhanced error logging - check if it's a PDT or account issue
                 logger.critical(f"❌ Failed to create emergency stop loss for {symbol}")
                 logger.critical(f"   Stop loss details: {emergency_stop_data}")
                 logger.critical(f"   Signal stop price: ${signal.stop_loss_price:.2f}")
                 logger.critical(f"   Filled quantity: {filled_qty}")
+                
+                # Check if symbol is PDT-blocked
+                if self.gateway.is_symbol_pdt_blocked(symbol):
+                    logger.critical(f"   💡 CAUSE: {symbol} is PDT-blocked, cannot create stop loss orders")
+                
+                # Get account info to check for buying power issues
+                try:
+                    account = await self.gateway.get_account()
+                    if account:
+                        logger.critical(f"   📊 Account status - Cash: ${float(account.cash):.2f}, Buying Power: ${float(account.buying_power):.2f}")
+                except Exception as e:
+                    logger.critical(f"   ⚠️ Could not retrieve account info: {e}")
                 
                 await self.alerter.send_position_safety_alert(
                     symbol,

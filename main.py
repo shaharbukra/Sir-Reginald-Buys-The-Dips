@@ -307,15 +307,30 @@ class IntelligentTradingSystem:
                         self.logger.critical(f"✅ Emergency stop created: {symbol} @ ${stop_price:.2f}")
                         stops_created += 1
                     else:
-                        self.logger.info(f"ℹ️ Emergency stop not needed for {symbol} - shares already held by existing orders")
+                        # Check if it's because shares are held by existing orders or other reason
+                        self.logger.critical(f"❌ Failed to create emergency stop for {symbol}")
+                        self.logger.critical(f"   Emergency stop details: {emergency_stop_data}")
+                        
+                        # Check if symbol is PDT-blocked
+                        if self.gateway.is_symbol_pdt_blocked(symbol):
+                            self.logger.critical(f"   💡 REASON: {symbol} is PDT-blocked, cannot create stop loss")
+                        else:
+                            self.logger.critical(f"   🔍 Need to investigate order failure reason for {symbol}")
+                            
+                        # This position remains unprotected - continue trying other positions
                         
                 except Exception as stop_error:
                     self.logger.warning(f"Emergency stop creation failed for {pos['symbol']}: {stop_error}")
             
             if stops_created > 0:
-                self.logger.info(f"✅ Created {stops_created} emergency stop orders")
+                self.logger.critical(f"✅ Created {stops_created} emergency stop orders out of {len(naked_positions)} naked positions")
             else:
-                self.logger.info("ℹ️ No emergency stops created - positions already protected by existing orders")
+                self.logger.critical(f"❌ No emergency stops created for {len(naked_positions)} naked positions - POSITIONS REMAIN UNPROTECTED")
+                
+            # Report final protection status
+            unprotected_count = len(naked_positions) - stops_created
+            if unprotected_count > 0:
+                self.logger.critical(f"🚨 CRITICAL: {unprotected_count} positions remain without stop protection")
                 
         except Exception as e:
             self.logger.error(f"Emergency stop creation failed: {e}")
