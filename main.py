@@ -330,46 +330,11 @@ class IntelligentTradingSystem:
                         'time_in_force': 'day'
                     }
                     
-                    # Add detailed logging before submission
-                    self.logger.info(f"🔄 Attempting to submit emergency stop for {symbol}: {emergency_stop_data}")
+                    # ROBUST RETRY LOGIC for emergency stops
+                    stop_created = await self._create_emergency_stop_with_retry(symbol, emergency_stop_data, max_retries=5)
                     
-                    stop_response = await self.gateway.submit_order(emergency_stop_data)
-                    
-                    if stop_response:
-                        self.logger.critical(f"✅ Emergency stop created: {symbol} @ ${stop_price:.2f}")
-                        self.logger.critical(f"   Order ID: {getattr(stop_response, 'id', 'unknown')}")
+                    if stop_created:
                         stops_created += 1
-                    else:
-                        # Enhanced error diagnosis
-                        self.logger.critical(f"❌ Failed to create emergency stop for {symbol}")
-                        self.logger.critical(f"   Emergency stop details: {emergency_stop_data}")
-                        
-                        # Check if symbol is PDT-blocked
-                        if self.gateway.is_symbol_pdt_blocked(symbol):
-                            self.logger.critical(f"   💡 REASON: {symbol} is PDT-blocked, cannot create stop loss")
-                        else:
-                            # Check market hours and account status
-                            try:
-                                clock = await self.gateway.get_clock()
-                                if clock and hasattr(clock, 'is_open'):
-                                    market_status = "OPEN" if clock.is_open else "CLOSED"
-                                    self.logger.critical(f"   📅 Market status: {market_status}")
-                                else:
-                                    self.logger.critical(f"   📅 Could not determine market status")
-                                    
-                                account = await self.gateway.get_account()
-                                if account:
-                                    self.logger.critical(f"   💰 Account - Cash: ${float(account.cash):.2f}, Buying Power: ${float(account.buying_power):.2f}")
-                                    self.logger.critical(f"   📊 Account status: {getattr(account, 'status', 'unknown')}")
-                                else:
-                                    self.logger.critical(f"   ❌ Could not retrieve account information")
-                                    
-                            except Exception as diag_error:
-                                self.logger.critical(f"   ⚠️ Error during failure diagnosis: {diag_error}")
-                            
-                            self.logger.critical(f"   🔍 Order submission returned None - check API connectivity and permissions")
-                            
-                        # This position remains unprotected - continue trying other positions
                         
                 except Exception as stop_error:
                     self.logger.warning(f"Emergency stop creation failed for {pos['symbol']}: {stop_error}")
@@ -384,22 +349,481 @@ class IntelligentTradingSystem:
             if unprotected_count > 0:
                 self.logger.critical(f"🚨 CRITICAL: {unprotected_count} positions remain without stop protection")
                 
-                # CRITICAL DECISION: If all emergency stops failed, consider emergency liquidation
+                # CRITICAL DECISION: If all emergency stops failed, initiate emergency liquidation
                 if stops_created == 0 and len(naked_positions) > 0:
-                    self.logger.critical(f"⚠️ CONSIDERING EMERGENCY LIQUIDATION: ALL emergency stops failed")
+                    self.logger.critical(f"🚨 EMERGENCY LIQUIDATION DECISION: ALL emergency stops failed")
                     self.logger.critical(f"   This indicates serious API/connectivity issues")
                     self.logger.critical(f"   Positions are exposed to unlimited risk")
+                    self.logger.critical(f"   Initiating emergency liquidation protocol...")
                     
-                    # For now, just alert - could add emergency liquidation logic here
                     await self.alerter.send_critical_alert(
-                        "EMERGENCY: All stop protection failed",
-                        f"ALL {len(naked_positions)} emergency stops failed to create. "
-                        f"Positions: {[pos['symbol'] for pos in naked_positions]}. "
-                        f"Manual intervention required immediately!"
+                        "EMERGENCY LIQUIDATION: All stops failed",
+                        f"ALL {len(naked_positions)} emergency stops failed. Initiating emergency liquidation to prevent unlimited losses. "
+                        f"Positions: {[pos['symbol'] for pos in naked_positions]}"
                     )
+                    
+                    # Execute emergency liquidation
+                    liquidated_positions = await self._execute_emergency_liquidation(naked_positions)
+                    
+                    if liquidated_positions > 0:
+                        self.logger.critical(f"✅ Emergency liquidation completed: {liquidated_positions}/{len(naked_positions)} positions closed")
+                    else:
+                        self.logger.critical(f"❌ EMERGENCY LIQUIDATION FAILED: No positions could be closed!")
+                        await self.alerter.send_critical_alert(
+                            "CRITICAL: Emergency liquidation failed",
+                            f"Could not liquidate ANY of {len(naked_positions)} unprotected positions. "
+                            f"System shutdown required. Manual intervention critical!"
+                        )
                 
         except Exception as e:
             self.logger.error(f"Emergency stop creation failed: {e}")
+    
+    async def _create_emergency_stop_with_retry(self, symbol: str, emergency_stop_data: Dict, max_retries: int = 5) -> bool:
+        """Create emergency stop with robust retry logic and escalating responses"""
+        import asyncio
+        
+        for attempt in range(max_retries):
+            try:
+                wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                
+                if attempt > 0:
+                    self.logger.critical(f"🔄 RETRY {attempt + 1}/{max_retries} for {symbol} emergency stop (waiting {wait_time}s)")
+                    await asyncio.sleep(wait_time)
+                else:
+                    self.logger.info(f"🔄 Attempting emergency stop for {symbol}: {emergency_stop_data}")
+                
+                # Submit order
+                stop_response = await self.gateway.submit_order(emergency_stop_data)
+                
+                if stop_response:
+                    order_id = getattr(stop_response, 'id', 'unknown')
+                    self.logger.critical(f"✅ Emergency stop SUCCESSFUL: {symbol} @ ${emergency_stop_data['stop_price']}")
+                    self.logger.critical(f"   Order ID: {order_id}, Attempt: {attempt + 1}/{max_retries}")
+                    return True
+                else:
+                    self.logger.critical(f"❌ Emergency stop attempt {attempt + 1}/{max_retries} FAILED for {symbol}")
+                    
+                    # Enhanced diagnostics on each failure
+                    await self._diagnose_stop_failure(symbol, emergency_stop_data, attempt + 1)
+                    
+                    # On final attempt, try alternative approaches
+                    if attempt == max_retries - 1:
+                        self.logger.critical(f"🚨 FINAL ATTEMPT FAILED for {symbol} - trying alternative approaches")
+                        
+                        # Try with GTC instead of DAY
+                        alternative_data = emergency_stop_data.copy()
+                        alternative_data['time_in_force'] = 'gtc'
+                        
+                        self.logger.critical(f"🔄 Trying GTC order for {symbol}: {alternative_data}")
+                        gtc_response = await self.gateway.submit_order(alternative_data)
+                        
+                        if gtc_response:
+                            order_id = getattr(gtc_response, 'id', 'unknown')
+                            self.logger.critical(f"✅ Emergency stop SUCCESSFUL (GTC): {symbol} (Order: {order_id})")
+                            return True
+                        
+                        # If GTC also fails, this is critical
+                        self.logger.critical(f"🚨 ALL EMERGENCY STOP ATTEMPTS EXHAUSTED for {symbol}")
+                        return False
+                    
+            except Exception as e:
+                self.logger.critical(f"❌ Emergency stop attempt {attempt + 1}/{max_retries} ERROR for {symbol}: {e}")
+                
+                # On final attempt with exception, this is critical  
+                if attempt == max_retries - 1:
+                    self.logger.critical(f"🚨 EMERGENCY STOP CREATION COMPLETELY FAILED for {symbol}")
+                    return False
+        
+        return False
+    
+    async def _diagnose_stop_failure(self, symbol: str, emergency_stop_data: Dict, attempt: int):
+        """Diagnose why emergency stop creation failed"""
+        try:
+            self.logger.critical(f"🔍 Diagnosing failure for {symbol} (attempt {attempt})")
+            
+            # Check if symbol is PDT-blocked
+            if self.gateway.is_symbol_pdt_blocked(symbol):
+                self.logger.critical(f"   💡 CAUSE: {symbol} is PDT-blocked")
+                return
+            
+            # Check market status
+            try:
+                clock = await self.gateway.get_clock()
+                if clock and hasattr(clock, 'is_open'):
+                    market_status = "OPEN" if clock.is_open else "CLOSED"
+                    self.logger.critical(f"   📅 Market: {market_status}")
+                    
+                    if not clock.is_open:
+                        self.logger.critical(f"   ⚠️ Market is CLOSED - this may cause order failures")
+                else:
+                    self.logger.critical(f"   📅 Could not determine market status")
+            except Exception as clock_error:
+                self.logger.critical(f"   📅 Clock check failed: {clock_error}")
+            
+            # Check account status
+            try:
+                account = await self.gateway.get_account()
+                if account:
+                    cash = float(account.cash)
+                    buying_power = float(account.buying_power)
+                    account_status = getattr(account, 'status', 'unknown')
+                    
+                    self.logger.critical(f"   💰 Cash: ${cash:.2f}, Buying Power: ${buying_power:.2f}")
+                    self.logger.critical(f"   📊 Account status: {account_status}")
+                    
+                    if account_status != 'ACTIVE':
+                        self.logger.critical(f"   🚨 Account status is NOT ACTIVE: {account_status}")
+                else:
+                    self.logger.critical(f"   ❌ Could not retrieve account info")
+            except Exception as account_error:
+                self.logger.critical(f"   💰 Account check failed: {account_error}")
+            
+            # Check for existing orders that might conflict
+            try:
+                existing_orders = await self.gateway.get_orders('open')
+                symbol_orders = [o for o in existing_orders if hasattr(o, 'symbol') and o.symbol == symbol]
+                
+                if symbol_orders:
+                    self.logger.critical(f"   📋 Found {len(symbol_orders)} existing orders for {symbol}")
+                    for order in symbol_orders:
+                        order_type = getattr(order, 'type', 'unknown')
+                        order_side = getattr(order, 'side', 'unknown')
+                        order_qty = getattr(order, 'qty', 'unknown')
+                        self.logger.critical(f"      - {order_type} {order_side} {order_qty}")
+                else:
+                    self.logger.critical(f"   📋 No existing orders for {symbol}")
+            except Exception as orders_error:
+                self.logger.critical(f"   📋 Orders check failed: {orders_error}")
+                
+        except Exception as diag_error:
+            self.logger.critical(f"   ⚠️ Diagnosis failed: {diag_error}")
+    
+    async def _execute_emergency_liquidation(self, unprotected_positions: List[Dict]) -> int:
+        """Execute emergency liquidation of unprotected positions"""
+        import asyncio
+        
+        self.logger.critical("🚨 EXECUTING EMERGENCY LIQUIDATION")
+        self.logger.critical("   This is the nuclear option to prevent unlimited losses")
+        self.logger.critical("   All affected positions will be closed at market price")
+        
+        liquidated_count = 0
+        
+        for pos in unprotected_positions:
+            try:
+                symbol = pos['symbol']
+                qty = abs(pos['qty'])
+                side = 'sell' if pos['side'] == 'long' else 'buy'
+                
+                self.logger.critical(f"🧨 LIQUIDATING {symbol}: {qty} shares ({side})")
+                
+                # Create market liquidation order
+                liquidation_data = {
+                    'symbol': symbol,
+                    'qty': str(int(qty)),
+                    'side': side,
+                    'type': 'market',
+                    'time_in_force': 'day'
+                }
+                
+                # Try liquidation with retry
+                for attempt in range(3):
+                    try:
+                        if attempt > 0:
+                            self.logger.critical(f"🔄 Liquidation retry {attempt + 1}/3 for {symbol}")
+                            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                        
+                        liquidation_response = await self.gateway.submit_order(liquidation_data)
+                        
+                        if liquidation_response:
+                            order_id = getattr(liquidation_response, 'id', 'unknown')
+                            self.logger.critical(f"✅ LIQUIDATION ORDER SUBMITTED: {symbol} (Order: {order_id})")
+                            liquidated_count += 1
+                            break
+                        else:
+                            self.logger.critical(f"❌ Liquidation attempt {attempt + 1}/3 failed for {symbol}")
+                            
+                            # On final attempt, log extensive diagnostics
+                            if attempt == 2:
+                                self.logger.critical(f"🚨 LIQUIDATION EXHAUSTED for {symbol}")
+                                try:
+                                    account = await self.gateway.get_account()
+                                    if account:
+                                        self.logger.critical(f"   Account status: {getattr(account, 'status', 'unknown')}")
+                                    
+                                    clock = await self.gateway.get_clock()
+                                    if clock:
+                                        market_status = "OPEN" if clock.is_open else "CLOSED"
+                                        self.logger.critical(f"   Market: {market_status}")
+                                except:
+                                    pass
+                    
+                    except Exception as liquidation_error:
+                        self.logger.critical(f"❌ Liquidation attempt {attempt + 1}/3 ERROR for {symbol}: {liquidation_error}")
+                        
+                        if attempt == 2:
+                            self.logger.critical(f"🚨 LIQUIDATION COMPLETELY FAILED for {symbol}")
+                
+            except Exception as pos_error:
+                self.logger.critical(f"❌ Emergency liquidation error for {pos['symbol']}: {pos_error}")
+        
+        # Final liquidation report
+        success_rate = (liquidated_count / len(unprotected_positions)) * 100 if unprotected_positions else 0
+        
+        self.logger.critical(f"📊 EMERGENCY LIQUIDATION SUMMARY:")
+        self.logger.critical(f"   Attempted: {len(unprotected_positions)} positions")
+        self.logger.critical(f"   Successful: {liquidated_count} positions")
+        self.logger.critical(f"   Success rate: {success_rate:.1f}%")
+        
+        if liquidated_count == len(unprotected_positions):
+            self.logger.critical(f"✅ EMERGENCY LIQUIDATION SUCCESSFUL: All positions closed")
+        elif liquidated_count > 0:
+            remaining = len(unprotected_positions) - liquidated_count
+            self.logger.critical(f"⚠️ PARTIAL LIQUIDATION: {remaining} positions still unprotected")
+        else:
+            self.logger.critical(f"❌ EMERGENCY LIQUIDATION FAILED: No positions could be closed")
+        
+        return liquidated_count
+    
+    async def _monitor_position_protection(self):
+        """Continuously monitor that all positions have stop protection"""
+        try:
+            # Get current positions
+            positions = await self.gateway.get_all_positions()
+            active_positions = [pos for pos in positions if float(pos.qty) != 0]
+            
+            if not active_positions:
+                return  # No positions to monitor
+            
+            # Get all open orders
+            open_orders = await self.gateway.get_orders('open')
+            
+            # Check protection for each position
+            unprotected_positions = []
+            
+            for position in active_positions:
+                symbol = position.symbol
+                qty = float(position.qty)
+                position_side = 'long' if qty > 0 else 'short'
+                
+                # Look for protective orders for this position
+                has_protection = False
+                
+                for order in open_orders:
+                    if hasattr(order, 'symbol') and order.symbol == symbol:
+                        order_type = getattr(order, 'type', '').lower()
+                        order_side = getattr(order, 'side', '').lower()
+                        stop_price = getattr(order, 'stop_price', None)
+                        
+                        # Check for protective orders
+                        is_stop = 'stop' in order_type or stop_price is not None
+                        is_protective_limit = (order_type == 'limit' and 
+                                             ((position_side == 'long' and order_side == 'sell') or
+                                              (position_side == 'short' and order_side == 'buy')))
+                        
+                        if is_stop or is_protective_limit:
+                            has_protection = True
+                            break
+                
+                if not has_protection:
+                    unprotected_positions.append({
+                        'symbol': symbol,
+                        'qty': qty,
+                        'side': position_side,
+                        'market_value': float(position.market_value),
+                        'unrealized_pl': float(position.unrealized_pl),
+                        'unrealized_pct': float(position.unrealized_plpc) * 100
+                    })
+            
+            # If unprotected positions found, take immediate action
+            if unprotected_positions:
+                self.logger.critical(f"🚨 RUNTIME ALERT: {len(unprotected_positions)} positions lost protection!")
+                
+                for pos in unprotected_positions:
+                    self.logger.critical(f"   ❌ {pos['symbol']}: {pos['qty']} shares, {pos['unrealized_pct']:+.1f}% P&L")
+                
+                # Send alert
+                await self.alerter.send_critical_alert(
+                    "RUNTIME: Positions lost protection",
+                    f"Found {len(unprotected_positions)} unprotected positions during runtime: "
+                    f"{[pos['symbol'] for pos in unprotected_positions]}. Creating emergency stops immediately!"
+                )
+                
+                # Create emergency stops immediately
+                self.logger.critical("🆘 Creating RUNTIME emergency stops...")
+                stops_created = 0
+                
+                for pos in unprotected_positions:
+                    try:
+                        symbol = pos['symbol']
+                        qty = abs(pos['qty'])
+                        current_price = pos['market_value'] / abs(pos['qty'])
+                        
+                        # 8% stop loss
+                        if pos['side'] == 'long':
+                            stop_price = current_price * 0.92
+                            side = 'sell'
+                        else:
+                            stop_price = current_price * 1.08
+                            side = 'buy'
+                        
+                        emergency_stop_data = {
+                            'symbol': symbol,
+                            'qty': str(int(qty)),
+                            'side': side,
+                            'type': 'stop',
+                            'stop_price': str(round(stop_price, 2)),
+                            'time_in_force': 'day'
+                        }
+                        
+                        # Use robust retry logic
+                        stop_created = await self._create_emergency_stop_with_retry(symbol, emergency_stop_data, max_retries=3)
+                        
+                        if stop_created:
+                            stops_created += 1
+                            self.logger.critical(f"✅ Runtime emergency stop created for {symbol}")
+                        else:
+                            self.logger.critical(f"❌ FAILED to create runtime emergency stop for {symbol}")
+                            
+                    except Exception as stop_error:
+                        self.logger.critical(f"❌ Runtime emergency stop error for {pos['symbol']}: {stop_error}")
+                
+                # Final status
+                if stops_created == len(unprotected_positions):
+                    self.logger.critical(f"✅ All {stops_created} runtime emergency stops created successfully")
+                else:
+                    remaining_unprotected = len(unprotected_positions) - stops_created
+                    self.logger.critical(f"🚨 CRITICAL: {remaining_unprotected} positions STILL unprotected after runtime emergency stop creation!")
+                    
+                    # This is extremely critical - consider emergency liquidation
+                    if remaining_unprotected > 0:
+                        await self.alerter.send_critical_alert(
+                            "CRITICAL: Runtime protection failure",
+                            f"{remaining_unprotected} positions could not be protected with emergency stops. "
+                            f"Manual intervention required immediately!"
+                        )
+            
+        except Exception as e:
+            self.logger.critical(f"❌ Position protection monitoring failed: {e}")
+            # This is critical - if we can't monitor protection, we're blind to risk
+            await self.alerter.send_critical_alert(
+                "CRITICAL: Protection monitoring failed",
+                f"Cannot monitor position protection: {e}. System may have unprotected positions!"
+            )
+    
+    async def _periodic_protection_verification(self):
+        """Periodic deep verification of position protection (runs every 5 loops)"""
+        try:
+            self.logger.info("🔍 Running periodic protection verification...")
+            
+            # Get all positions and orders
+            positions = await self.gateway.get_all_positions()
+            active_positions = [pos for pos in positions if float(pos.qty) != 0]
+            open_orders = await self.gateway.get_orders('open')
+            
+            if not active_positions:
+                self.logger.info("✅ Periodic verification: No positions to verify")
+                return
+            
+            protection_report = []
+            unprotected_count = 0
+            
+            for position in active_positions:
+                symbol = position.symbol
+                qty = float(position.qty)
+                position_side = 'long' if qty > 0 else 'short'
+                market_value = float(position.market_value)
+                
+                # Find all orders for this symbol
+                symbol_orders = [order for order in open_orders 
+                               if hasattr(order, 'symbol') and order.symbol == symbol]
+                
+                # Categorize orders
+                stop_orders = []
+                limit_orders = []
+                
+                for order in symbol_orders:
+                    order_type = getattr(order, 'type', '').lower()
+                    order_side = getattr(order, 'side', '').lower()
+                    stop_price = getattr(order, 'stop_price', None)
+                    limit_price = getattr(order, 'limit_price', None)
+                    
+                    if 'stop' in order_type or stop_price is not None:
+                        stop_orders.append({
+                            'type': order_type,
+                            'side': order_side,
+                            'price': stop_price or limit_price,
+                            'qty': getattr(order, 'qty', 'unknown')
+                        })
+                    elif order_type == 'limit':
+                        limit_orders.append({
+                            'type': order_type,
+                            'side': order_side,
+                            'price': limit_price,
+                            'qty': getattr(order, 'qty', 'unknown')
+                        })
+                
+                # Determine protection status
+                has_stop_protection = len(stop_orders) > 0
+                has_limit_protection = any(
+                    (position_side == 'long' and order['side'] == 'sell') or
+                    (position_side == 'short' and order['side'] == 'buy')
+                    for order in limit_orders
+                )
+                
+                protection_status = "PROTECTED" if (has_stop_protection or has_limit_protection) else "UNPROTECTED"
+                
+                if protection_status == "UNPROTECTED":
+                    unprotected_count += 1
+                
+                protection_report.append({
+                    'symbol': symbol,
+                    'qty': qty,
+                    'side': position_side,
+                    'value': market_value,
+                    'status': protection_status,
+                    'stop_orders': len(stop_orders),
+                    'limit_orders': len([o for o in limit_orders if 
+                                       (position_side == 'long' and o['side'] == 'sell') or
+                                       (position_side == 'short' and o['side'] == 'buy')])
+                })
+            
+            # Log verification results
+            self.logger.info(f"📊 Periodic Protection Verification Results:")
+            self.logger.info(f"   Total positions: {len(active_positions)}")
+            self.logger.info(f"   Protected: {len(active_positions) - unprotected_count}")
+            self.logger.info(f"   Unprotected: {unprotected_count}")
+            
+            # Detailed report
+            for pos in protection_report:
+                status_emoji = "✅" if pos['status'] == "PROTECTED" else "❌"
+                self.logger.info(f"   {status_emoji} {pos['symbol']}: {pos['qty']} shares, "
+                               f"${pos['value']:,.2f}, {pos['stop_orders']} stops, {pos['limit_orders']} limits")
+            
+            # Alert if any positions are unprotected
+            if unprotected_count > 0:
+                unprotected_symbols = [pos['symbol'] for pos in protection_report 
+                                     if pos['status'] == "UNPROTECTED"]
+                
+                self.logger.critical(f"🚨 PERIODIC VERIFICATION ALERT: {unprotected_count} unprotected positions found!")
+                
+                await self.alerter.send_critical_alert(
+                    "Periodic verification: Unprotected positions detected",
+                    f"Found {unprotected_count} unprotected positions: {unprotected_symbols}. "
+                    f"Runtime monitoring should have caught this - investigate system health!"
+                )
+                
+                # This suggests runtime monitoring may have failed - run it manually
+                self.logger.critical("🔄 Running emergency runtime protection check...")
+                await self._monitor_position_protection()
+            else:
+                self.logger.info("✅ Periodic verification: All positions properly protected")
+            
+        except Exception as e:
+            self.logger.critical(f"❌ Periodic protection verification failed: {e}")
+            await self.alerter.send_critical_alert(
+                "CRITICAL: Periodic protection verification failed",
+                f"Could not verify position protection: {e}. Manual check required!"
+            )
     
     async def _startup_position_reconciliation(self):
         """Reconcile our position understanding with actual broker positions"""
@@ -541,6 +965,12 @@ class IntelligentTradingSystem:
                 except Exception as e:
                     self.logger.error(f"❌ CRITICAL: Position management error: {e}")
                 
+                # === POSITION PROTECTION MONITORING (CRITICAL) ===
+                try:
+                    await self._monitor_position_protection()
+                except Exception as e:
+                    self.logger.error(f"❌ CRITICAL: Position protection monitoring error: {e}")
+                
                 # === STOP LOSS & TRAILING STOPS (CRITICAL) ===
                 try:
                     await self.order_executor.check_stop_losses()
@@ -577,6 +1007,13 @@ class IntelligentTradingSystem:
                     await self._monitor_pdt_status()
                 except Exception as e:
                     self.logger.error(f"❌ PDT monitoring error: {e}")
+                
+                # === PERIODIC PROTECTION VERIFICATION (Every 5 loops) ===
+                if loop_count % 5 == 0:  # Run every 5th loop (~5-10 minutes)
+                    try:
+                        await self._periodic_protection_verification()
+                    except Exception as e:
+                        self.logger.error(f"❌ Periodic protection verification error: {e}")
                     
                 # === ADAPTIVE LOOP TIMING ===
                 execution_time = (datetime.now() - loop_start).total_seconds()
