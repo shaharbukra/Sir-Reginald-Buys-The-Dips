@@ -870,10 +870,20 @@ class IntelligentTradingSystem:
                 for pos in suspicious_positions:
                     self.logger.warning(f"   {pos['symbol']}: {pos['qty']} shares, ${pos['value']:,.2f} ({pos['percentage']:.1f}%)")
                 
-                await self.alerter.send_critical_alert(
-                    "Large positions detected at startup",
-                    f"Found {len(suspicious_positions)} positions > 10% of account: {', '.join([p['symbol'] for p in suspicious_positions])}"
-                )
+                # Only alert if this is a new large position issue (not repeatedly alerting for same positions)
+                new_large_positions = [pos['symbol'] for pos in suspicious_positions]
+                if not hasattr(self, '_last_large_positions') or self._last_large_positions != new_large_positions:
+                    self._last_large_positions = new_large_positions
+                    await self.alerter.send_critical_alert(
+                        "Large positions detected at startup", 
+                        f"Found {len(suspicious_positions)} positions > 10% of account: {', '.join(new_large_positions)}"
+                    )
+                    
+                    # Consider reducing oversized positions during market hours
+                    if self.is_market_hours():
+                        await self._consider_position_reduction(suspicious_positions)
+                else:
+                    self.logger.info("ℹ️ Same large positions as before - alert suppressed")
             
             if broker_symbols:
                 self.logger.info(f"✅ Position reconciliation complete: {len(broker_symbols)} active positions")
@@ -888,6 +898,54 @@ class IntelligentTradingSystem:
                 "Position reconciliation failed at startup",
                 f"Unable to verify position accuracy: {e}"
             )
+    
+    def is_market_hours(self) -> bool:
+        """Check if market is currently open for trading"""
+        from datetime import datetime, time
+        import pytz
+        
+        # Get current time in ET
+        et_tz = pytz.timezone('US/Eastern')
+        et_now = datetime.now(et_tz)
+        
+        # Check if it's a weekday (0=Monday, 4=Friday)
+        if et_now.weekday() > 4:  # Weekend
+            return False
+            
+        # Market hours: 9:30 AM - 4:00 PM ET
+        market_open = time(9, 30)
+        market_close = time(16, 0)
+        current_time = et_now.time()
+        
+        return market_open <= current_time <= market_close
+    
+    async def _consider_position_reduction(self, large_positions):
+        """Consider reducing positions that are too large (>10% of account)"""
+        try:
+            for position in large_positions:
+                symbol = position['symbol']
+                current_qty = position['qty']
+                current_percentage = position['percentage']
+                
+                # Only reduce if position is significantly oversized (>12%)
+                if current_percentage > 12:
+                    # Calculate target reduction to get to 8% of account
+                    target_percentage = 8.0
+                    reduction_factor = target_percentage / current_percentage
+                    target_qty = int(current_qty * reduction_factor)
+                    qty_to_sell = current_qty - target_qty
+                    
+                    if qty_to_sell > 0:
+                        self.logger.warning(f"🎯 Consider reducing {symbol} position: sell {qty_to_sell} shares to reduce from {current_percentage:.1f}% to ~{target_percentage}%")
+                        
+                        # Log the recommendation but don't auto-execute for safety
+                        self.logger.info(f"💡 POSITION REDUCTION SUGGESTION for {symbol}:")
+                        self.logger.info(f"   Current: {current_qty} shares ({current_percentage:.1f}% of account)")
+                        self.logger.info(f"   Suggested: Sell {qty_to_sell} shares, keep {target_qty} shares")
+                        self.logger.info(f"   This would reduce position to ~{target_percentage}% of account")
+                        
+        except Exception as e:
+            self.logger.error(f"Error in position reduction consideration: {e}")
             
     async def run_intelligent_trading_loop(self):
         """Main intelligent trading loop with market-wide discovery"""

@@ -125,15 +125,20 @@ class PDTManager:
                 # Check if we opened a position in this symbol today
                 if symbol in self.open_positions_today:
                     # This would create a day trade
-                    if current_day_trade_count >= 3:
+                    potential_day_trades = current_day_trade_count + 1
+                    
+                    # More conservative approach: if we're at risk, prevent the trade
+                    if current_day_trade_count >= 2 and equity < 25000:  # Prevent at 2 instead of 3
+                        return False, f"PDT PREVENTION: Already have {current_day_trade_count} day trades. Preventing trade to avoid PDT violation (need <$25k account)"
+                    elif current_day_trade_count >= 3:
                         if equity < 25000:
                             return False, f"PDT VIOLATION RISK: Already have {current_day_trade_count} day trades in 5-day period. Account equity ${equity:,.2f} < $25,000 required for PDT."
                         elif not is_pdt_account:
                             return False, f"PDT FLAG RISK: {current_day_trade_count} day trades may trigger PDT flag. Consider waiting until tomorrow."
                     
-                    # If we're under the limit, allow but warn
-                    logger.warning(f"⚠️ {symbol}: Sell would create day trade #{current_day_trade_count + 1} of 4 allowed")
-                    return True, f"Day trade #{current_day_trade_count + 1} approved"
+                    # If we're under the conservative limit, allow but warn
+                    logger.warning(f"⚠️ {symbol}: Sell would create day trade #{potential_day_trades} (being conservative due to small account)")
+                    return True, f"Day trade #{potential_day_trades} approved (conservative limit)"
                 
                 # Selling a position not opened today - no PDT risk
                 return True, "Sell order approved (no PDT risk)"

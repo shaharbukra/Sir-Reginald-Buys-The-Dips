@@ -77,17 +77,32 @@ class SimpleTradeExecutor:
             
             # SAFETY CHECK: Minimum quantity requirements
             if quantity == 0:
-                # For high-priced stocks, try to buy 1 share if we can afford it within 10% of account
-                one_share_cost = signal.entry_price * 1.05  # 5% buffer
-                max_for_expensive_stock = account_value * 0.10  # Allow up to 10% for expensive stocks
+                # Check if this is a known expensive stock that we should avoid with small accounts
+                expensive_stocks = ['GOOGL', 'GOOG', 'AMZN', 'TSLA', 'BRK.A', 'BRK.B', 'NVDA', 'META']
+                if signal.symbol in expensive_stocks and account_value < 10000:
+                    logger.warning(f"❌ {signal.symbol} avoided: Known expensive stock, account too small (${account_value:,.0f})")
+                    logger.info(f"💡 Consider focusing on stocks under $100 for better position sizing with small account")
+                    return False
+                
+                # For high-priced stocks, try to buy 1 share if we can afford it within conservative limits
+                one_share_cost = signal.entry_price * 1.05  # 5% buffer for slippage
+                
+                # More conservative limits for small accounts
+                if account_value < 5000:
+                    max_for_expensive_stock = account_value * 0.08  # Only 8% for very small accounts
+                elif account_value < 10000: 
+                    max_for_expensive_stock = account_value * 0.10  # 10% for small accounts
+                else:
+                    max_for_expensive_stock = account_value * 0.15  # 15% for larger accounts
                 
                 if one_share_cost <= max_for_expensive_stock:
                     quantity = 1
                     position_value = one_share_cost
-                    logger.info(f"💰 High-priced stock: Buying 1 share of {signal.symbol} for ${position_value:.2f} (10% account limit)")
+                    logger.info(f"💰 High-priced stock: Buying 1 share of {signal.symbol} for ${position_value:.2f} ({(position_value/account_value*100):.1f}% of account)")
                 else:
                     logger.warning(f"❌ Cannot afford {signal.symbol} at ${signal.entry_price:.2f}")
-                    logger.warning(f"Need ${one_share_cost:.2f}, max allowed ${max_for_expensive_stock:.2f}")
+                    logger.warning(f"   Need ${one_share_cost:.2f}, max allowed ${max_for_expensive_stock:.2f} ({(max_for_expensive_stock/account_value*100):.0f}% of account)")
+                    logger.info(f"💡 Consider stocks under ${max_for_expensive_stock/1.05:.0f} for better position sizing")
                     return False
                     
             # PDT compliance check (now that quantity is properly calculated)

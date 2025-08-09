@@ -390,10 +390,33 @@ class IntelligentMarketFunnel:
             # Apply regime-specific filtering
             regime_criteria = SCREENING_CRITERIA['regime_criteria'].get(self.market_regime, {})
             
+            # Get account size for price filtering (if available)
+            account_value = None
+            try:
+                if hasattr(self, 'gateway') and self.gateway:
+                    account = await self.gateway.get_account_safe()
+                    if account:
+                        account_value = float(account.equity)
+            except:
+                account_value = None
+            
             filtered_candidates = []
             sector_counts = {}  # Track sector diversification (Grok feedback)
+            price_filtered_count = 0
             
             for candidate in candidates:
+                # Account-size-aware price filtering (prioritize affordable stocks for small accounts)
+                if account_value and account_value < 10000:
+                    # For small accounts, prioritize stocks that allow proper position sizing
+                    expensive_stocks = ['GOOGL', 'GOOG', 'AMZN', 'TSLA', 'BRK.A', 'BRK.B', 'NVDA', 'META']
+                    max_affordable_price = (account_value * 0.08) / 1.05  # 8% of account after slippage
+                    
+                    if (candidate.symbol in expensive_stocks or 
+                        candidate.current_price > max_affordable_price):
+                        price_filtered_count += 1
+                        logger.debug(f"💰 {candidate.symbol}: Filtered due to price ${candidate.current_price:.0f} (>${max_affordable_price:.0f} max for ${account_value:,.0f} account)")
+                        continue
+                
                 # Apply market regime filters
                 meets_criteria = self._meets_regime_criteria(candidate, regime_criteria)
                 logger.debug(f"📊 {candidate.symbol}: change={candidate.daily_change_pct:.1f}%, vol_ratio={candidate.volume_ratio:.1f}, sector={candidate.sector}, meets_criteria={meets_criteria}")
@@ -435,6 +458,8 @@ class IntelligentMarketFunnel:
             
             logger.info(f"🧠 AI filtering: {len(candidates)} → {len(top_candidates)} candidates "
                        f"(regime: {self.market_regime.value})")
+            if price_filtered_count > 0:
+                logger.info(f"💰 Price filtering: {price_filtered_count} expensive stocks filtered for small account")
             if final_sectors:
                 logger.info(f"🏢 Sector diversification: {dict(final_sectors)}")
                        

@@ -132,9 +132,12 @@ class ResilientAlpacaGateway:
                     )
                     
                 elif response.status == 429:  # Rate limited
-                    logger.warning("Rate limit exceeded, backing off...")
+                    self.consecutive_failures += 1
+                    backoff_time = min(60, API_CONFIG['retry_backoff_factor'] ** retry_count * (1 + self.consecutive_failures))
+                    logger.warning(f"Rate limit exceeded (failure #{self.consecutive_failures}), backing off for {backoff_time:.1f}s...")
+                    
                     if retry_count < API_CONFIG['max_retries']:
-                        await asyncio.sleep(API_CONFIG['retry_backoff_factor'] ** retry_count)
+                        await asyncio.sleep(backoff_time)
                         return await self._make_request(method, endpoint, data, params, retry_count + 1)
                     
                 else:
