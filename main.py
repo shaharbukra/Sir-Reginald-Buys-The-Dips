@@ -1472,6 +1472,9 @@ class IntelligentTradingSystem:
                     await self._manage_individual_position(position)
                 except Exception as e:
                     self.logger.error(f"Position management failed for {position.symbol}: {e}")
+            
+            # Check for oversized positions and reduce automatically
+            await self._check_and_reduce_oversized_positions(active_positions)
                     
         except Exception as e:
             self.logger.error(f"Position management system failed: {e}")
@@ -1533,6 +1536,81 @@ class IntelligentTradingSystem:
                 
         except Exception as e:
             self.logger.error(f"Individual position management failed for {position.symbol}: {e}")
+    
+    async def _check_and_reduce_oversized_positions(self, positions: List):
+        """Check for oversized positions and reduce them automatically"""
+        try:
+            from config import RISK_CONFIG
+            concentration_limit = RISK_CONFIG.get('concentration_limit_pct', 8.0) / 100.0
+            
+            # Get current account value
+            account_info = await self.gateway.get_account()
+            if not account_info or not hasattr(account_info, 'equity'):
+                self.logger.warning("Could not get account info for concentration check")
+                return
+                
+            account_value = float(account_info.equity)
+            oversized_positions = []
+            
+            for position in positions:
+                qty = float(position.qty)
+                if qty == 0:
+                    continue
+                    
+                # Get current price and calculate position value
+                quote = await self.gateway.get_quote(position.symbol)
+                if not quote:
+                    continue
+                    
+                current_price = float(quote.ask_price if qty > 0 else quote.bid_price)
+                position_value = abs(qty * current_price)
+                position_pct = position_value / account_value
+                
+                if position_pct > concentration_limit:
+                    oversized_positions.append({
+                        'symbol': position.symbol,
+                        'qty': qty,
+                        'value': position_value,
+                        'pct': position_pct * 100,
+                        'current_price': current_price
+                    })
+                    
+            # Reduce oversized positions
+            for pos in oversized_positions:
+                symbol = pos['symbol']
+                current_qty = pos['qty']
+                current_pct = pos['pct']
+                
+                # Calculate target quantity to get to 8% limit
+                target_value = account_value * concentration_limit
+                target_qty = int(target_value / pos['current_price'])
+                reduce_qty = abs(int(current_qty)) - target_qty
+                
+                if reduce_qty > 0:
+                    self.logger.warning(f"🔸 {symbol}: Reducing oversized position from {current_pct:.1f}% to {concentration_limit*100:.1f}%")
+                    self.logger.info(f"📊 {symbol}: Selling {reduce_qty} shares (keeping {target_qty})")
+                    
+                    # Create market sell order to reduce position
+                    order_data = {
+                        'symbol': symbol,
+                        'qty': str(reduce_qty),
+                        'side': 'sell' if current_qty > 0 else 'buy',
+                        'type': 'market',
+                        'time_in_force': 'day'
+                    }
+                    
+                    response = await self.gateway.submit_order(order_data)
+                    if response and response.success:
+                        self.logger.info(f"✅ Position reduction order submitted for {symbol}")
+                        
+                        # Send alert about position reduction
+                        alert_msg = f"🔸 {symbol}: Reduced oversized position from {current_pct:.1f}% to target {concentration_limit*100:.1f}%"
+                        await self.alerter.send_alert(alert_msg, level='WARNING')
+                    else:
+                        self.logger.error(f"❌ Position reduction failed for {symbol}")
+                        
+        except Exception as e:
+            self.logger.error(f"Oversized position check failed: {e}")
             
     async def _analyze_position_context(self, symbol: str, current_price: float, 
                                        unrealized_pct: float, bars: List) -> Dict:
