@@ -102,10 +102,11 @@ SCREENING_CRITERIA = {
     'regime_criteria': {
         MarketRegime.BULL_TRENDING: {
             'focus_on': 'gainers',
-            'min_daily_change': 0.0,  # Lowered due to data limitations on free tier
-            'min_volume_ratio': 1.2,  # Lowered to allow more candidates
+            'min_daily_change': -0.5,  # Allow small dips for better entries
+            'min_volume_ratio': 1.1,   # Further lowered for more opportunities
             'preferred_sectors': ['TECHNOLOGY', 'GROWTH', 'CONSUMER_DISCRETIONARY', 'EQUITY'],
-            'avoid_sectors': ['UTILITIES', 'DEFENSIVE']
+            'avoid_sectors': ['UTILITIES', 'DEFENSIVE'],
+            'max_position_size_pct': 8.0  # Reduce max position size to 8%
         },
         
         MarketRegime.BEAR_TRENDING: {
@@ -133,9 +134,11 @@ SCREENING_CRITERIA = {
         
         MarketRegime.LOW_VOLATILITY: {
             'focus_on': 'breakouts',
-            'min_consolidation_days': 5,
+            'min_consolidation_days': 3,        # Reduced for more opportunities
             'volume_expansion_required': True,
-            'technical_breakout_required': True
+            'technical_breakout_required': True,
+            'max_position_size_pct': 8.0,      # Consistent position sizing
+            'min_volume_ratio': 1.3             # Lower threshold for more signals
         }
     }
 }
@@ -186,14 +189,16 @@ WATCHLIST_CONFIG = {
 STRATEGY_CONFIG = {
     # Event-driven momentum strategy
     'momentum_strategy': {
-        'fast_ma_period': 10,
-        'slow_ma_period': 20,
+        'fast_ma_period': 8,                # Reduced for faster signals
+        'slow_ma_period': 16,               # Reduced for faster signals  
         'volume_confirmation': True,
         'rsi_filter': True,
-        'rsi_overbought': 75,
-        'rsi_oversold': 25,
-        'atr_stop_multiple': 2.0,
-        'min_atr': 0.02                     # 2% minimum volatility
+        'rsi_overbought': 70,               # Less restrictive (was 75)
+        'rsi_oversold': 30,                 # Less restrictive (was 25)
+        'atr_stop_multiple': 1.8,           # Tighter stops (was 2.0)
+        'min_atr': 0.015,                   # Lower threshold (was 0.02)
+        'trailing_stop_enabled': True,      # Add trailing stop feature
+        'trailing_stop_pct': 0.08           # 8% trailing stop
     },
     
     # Breakout strategy for low volatility regimes
@@ -236,7 +241,15 @@ RISK_CONFIG = {
     # PDT compliance
     'min_holding_period_hours': 24,        # Minimum hold time
     'pdt_day_trade_buffer': 1,             # Stay 1 trade under limit
-    'account_size_threshold': 25000        # PDT rule threshold
+    'account_size_threshold': 25000,       # PDT rule threshold
+    
+    # Enhanced Position Management
+    'max_position_loss_pct': -4.0,         # Cut losses at -4%
+    'profit_taking_levels': [6.0, 12.0],   # Take partial profits at +6% and +12%
+    'position_review_frequency_minutes': 15, # Review positions every 15min
+    'trailing_stop_activation_pct': 3.0,   # Activate trailing stop at +3%
+    'max_position_age_days': 5,            # Review old positions after 5 days
+    'concentration_limit_pct': 8.0         # No single position >8%
 }
 
 # === AI CONFIGURATION ===

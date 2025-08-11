@@ -348,6 +348,9 @@ class SimpleTradeExecutor:
                     
                     monitoring_summary['positions_details'].append(position_detail)
                     
+                    # Enhanced Position Management
+                    await self._enhanced_position_management(position, unrealized_pct, monitoring_summary)
+                    
                     # Generate alerts for significant moves
                     if unrealized_pct < -7.0:  # Approaching stop loss
                         monitoring_summary['alerts'].append(
@@ -367,6 +370,105 @@ class SimpleTradeExecutor:
         except Exception as e:
             logger.error(f"Position monitoring failed: {e}")
             return {'error': str(e)}
+            
+    async def _enhanced_position_management(self, position, unrealized_pct: float, monitoring_summary: Dict):
+        """Enhanced position management with profit taking and loss cutting"""
+        try:
+            from config import RISK_CONFIG
+            symbol = position.symbol
+            qty = float(position.qty)
+            
+            # 1. LOSS CUTTING: Cut losses at -4%
+            if unrealized_pct <= RISK_CONFIG.get('max_position_loss_pct', -4.0):
+                logger.warning(f"💸 {symbol}: Loss cutting triggered at {unrealized_pct:.1f}%")
+                await self._execute_loss_cut(symbol, qty, unrealized_pct)
+                monitoring_summary['alerts'].append(
+                    f"🔴 {symbol}: Loss cut executed at {unrealized_pct:.1f}%"
+                )
+                
+            # 2. PROFIT TAKING: Take partial profits at configured levels
+            profit_levels = RISK_CONFIG.get('profit_taking_levels', [6.0, 12.0])
+            for profit_level in profit_levels:
+                if unrealized_pct >= profit_level and not hasattr(self, f'_{symbol}_profit_{int(profit_level)}_taken'):
+                    logger.info(f"💰 {symbol}: Profit taking triggered at {unrealized_pct:.1f}%")
+                    await self._execute_partial_profit_taking(symbol, qty, profit_level, unrealized_pct)
+                    setattr(self, f'_{symbol}_profit_{int(profit_level)}_taken', True)
+                    monitoring_summary['alerts'].append(
+                        f"🟢 {symbol}: Partial profit taken at +{profit_level}%"
+                    )
+                    
+            # 3. TRAILING STOP: Activate trailing stop when in profit
+            trailing_activation = RISK_CONFIG.get('trailing_stop_activation_pct', 3.0)
+            if unrealized_pct >= trailing_activation:
+                await self._manage_trailing_stop(symbol, unrealized_pct)
+                
+        except Exception as e:
+            logger.error(f"Enhanced position management error for {position.symbol}: {e}")
+            
+    async def _execute_loss_cut(self, symbol: str, qty: float, loss_pct: float):
+        """Execute immediate loss cut"""
+        try:
+            logger.critical(f"🔴 LOSS CUT: Selling {qty} shares of {symbol} at {loss_pct:.1f}% loss")
+            
+            # Create market sell order to cut loss immediately
+            order_data = {
+                'symbol': symbol,
+                'qty': str(int(abs(qty))),
+                'side': 'sell' if qty > 0 else 'buy',
+                'type': 'market',
+                'time_in_force': 'day'
+            }
+            
+            response = await self.gateway.submit_order(order_data)
+            if response.success:
+                logger.info(f"✅ Loss cut order submitted for {symbol}")
+            else:
+                logger.error(f"❌ Loss cut order failed for {symbol}: {response.error}")
+                
+        except Exception as e:
+            logger.error(f"Loss cut execution failed for {symbol}: {e}")
+            
+    async def _execute_partial_profit_taking(self, symbol: str, qty: float, target_pct: float, current_pct: float):
+        """Execute partial profit taking"""
+        try:
+            # Sell 25% of position at first profit level, 50% at second
+            if target_pct <= 6.0:
+                sell_pct = 0.25
+            else:
+                sell_pct = 0.50
+                
+            sell_qty = int(abs(qty) * sell_pct)
+            
+            logger.info(f"💰 PROFIT TAKING: Selling {sell_qty} shares ({sell_pct*100}%) of {symbol} at +{current_pct:.1f}%")
+            
+            order_data = {
+                'symbol': symbol,
+                'qty': str(sell_qty),
+                'side': 'sell' if qty > 0 else 'buy',
+                'type': 'market',
+                'time_in_force': 'day'
+            }
+            
+            response = await self.gateway.submit_order(order_data)
+            if response.success:
+                logger.info(f"✅ Profit taking order submitted for {symbol}")
+            else:
+                logger.error(f"❌ Profit taking order failed for {symbol}: {response.error}")
+                
+        except Exception as e:
+            logger.error(f"Profit taking execution failed for {symbol}: {e}")
+            
+    async def _manage_trailing_stop(self, symbol: str, current_profit_pct: float):
+        """Manage trailing stop loss orders"""
+        try:
+            from config import STRATEGY_CONFIG
+            trailing_pct = STRATEGY_CONFIG['momentum_strategy'].get('trailing_stop_pct', 0.08)
+            
+            # This would implement trailing stop logic - for now just log
+            logger.debug(f"📊 {symbol}: Trailing stop active at {current_profit_pct:.1f}% profit")
+            
+        except Exception as e:
+            logger.error(f"Trailing stop management failed for {symbol}: {e}")
             
     async def emergency_close_all(self) -> bool:
         """Emergency liquidation of all positions"""
