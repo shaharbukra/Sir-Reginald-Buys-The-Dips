@@ -1520,6 +1520,71 @@ class IntelligentTradingSystem:
                 
             current_price = float(current_quote.get('ask_price', 0)) or float(current_quote.get('bid_price', 0))
             
+            # CRITICAL: Enhanced risk management - Loss cutting at -4%
+            from config import RISK_CONFIG
+            max_loss_pct = RISK_CONFIG.get('max_position_loss_pct', -4.0)
+            if unrealized_pct <= max_loss_pct:
+                self.logger.critical(f"🔴 LOSS CUT TRIGGERED: {symbol} at {unrealized_pct:.1f}% loss (limit: {max_loss_pct}%)")
+                
+                # Execute immediate loss cut with market sell order
+                order_data = {
+                    'symbol': symbol,
+                    'qty': str(int(abs(qty))),
+                    'side': 'sell' if qty > 0 else 'buy',
+                    'type': 'market',
+                    'time_in_force': 'day'
+                }
+                
+                try:
+                    response = await self.gateway.submit_order(order_data)
+                    if response and response.success:
+                        self.logger.critical(f"✅ LOSS CUT EXECUTED: {symbol} - sold {int(abs(qty))} shares at {unrealized_pct:.1f}% loss")
+                        await self.alerter.send_alert(
+                            f"🔴 LOSS CUT: {symbol} sold at {unrealized_pct:.1f}% loss", 
+                            level='CRITICAL'
+                        )
+                        return  # Exit - position management complete
+                    else:
+                        self.logger.error(f"❌ LOSS CUT FAILED: {symbol} order submission failed")
+                except Exception as e:
+                    self.logger.error(f"❌ LOSS CUT ERROR: {symbol} - {e}")
+            
+            # Check for profit taking opportunities
+            profit_levels = RISK_CONFIG.get('profit_taking_levels', [6.0, 12.0])
+            for profit_level in profit_levels:
+                if unrealized_pct >= profit_level:
+                    # Only take profit if we haven't already done so at this level
+                    profit_flag = f'_{symbol}_profit_{int(profit_level)}_taken'
+                    if not hasattr(self, profit_flag):
+                        # Take partial profit (25% at 6%, 50% at 12%)
+                        profit_pct = 0.25 if profit_level <= 6.0 else 0.50
+                        sell_qty = int(abs(qty) * profit_pct)
+                        
+                        if sell_qty > 0:
+                            self.logger.info(f"💰 PROFIT TAKING: {symbol} at +{unrealized_pct:.1f}% - selling {sell_qty} shares ({profit_pct*100}%)")
+                            
+                            order_data = {
+                                'symbol': symbol,
+                                'qty': str(sell_qty),
+                                'side': 'sell' if qty > 0 else 'buy',
+                                'type': 'market',
+                                'time_in_force': 'day'
+                            }
+                            
+                            try:
+                                response = await self.gateway.submit_order(order_data)
+                                if response and response.success:
+                                    self.logger.info(f"✅ PROFIT TAKEN: {symbol} - sold {sell_qty} shares at +{unrealized_pct:.1f}%")
+                                    setattr(self, profit_flag, True)
+                                    await self.alerter.send_alert(
+                                        f"💰 PROFIT TAKEN: {symbol} partial sale at +{unrealized_pct:.1f}%",
+                                        level='INFO'
+                                    )
+                                else:
+                                    self.logger.error(f"❌ PROFIT TAKING FAILED: {symbol}")
+                            except Exception as e:
+                                self.logger.error(f"❌ PROFIT TAKING ERROR: {symbol} - {e}")
+            
             # Analyze position against current market intelligence
             position_analysis = await self._analyze_position_context(
                 symbol, current_price, unrealized_pct, bars
