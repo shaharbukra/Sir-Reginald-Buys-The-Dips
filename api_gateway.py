@@ -206,6 +206,31 @@ class ResilientAlpacaGateway:
         except Exception as e:
             logger.error(f"Account request failed: {e}")
             return None
+    
+    async def get_account(self):
+        """Get account information (alias for get_account_safe for compatibility)"""
+        return await self.get_account_safe()
+    
+    async def get_clock(self):
+        """Get market clock information"""
+        try:
+            response = await self._make_request('GET', '/v2/clock')
+            if response.success:
+                # Return parsed clock data with proper attributes
+                class Clock:
+                    def __init__(self, data):
+                        self.timestamp = data.get('timestamp')
+                        self.is_open = data.get('is_open', False)
+                        self.next_open = data.get('next_open')
+                        self.next_close = data.get('next_close')
+                
+                return Clock(response.data)
+            else:
+                logger.error(f"Failed to get clock: {response.error}")
+                return None
+        except Exception as e:
+            logger.error(f"Clock request failed: {e}")
+            return None
             
     async def get_all_positions(self):
         """Get all current positions"""
@@ -552,6 +577,7 @@ class ResilientAlpacaGateway:
                 self.last_equity = data.get('last_equity', '0')
                 self.day_trade_count = data.get('day_trade_count', 0)
                 self.pattern_day_trader = data.get('pattern_day_trader', False)
+                self.status = data.get('status', 'ACTIVE')  # Default to ACTIVE if not specified
                 
         return Account(data)
         
