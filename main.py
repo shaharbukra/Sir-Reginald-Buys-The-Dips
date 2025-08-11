@@ -234,7 +234,7 @@ class IntelligentTradingSystem:
                 
                 for order in open_orders:
                     if hasattr(order, 'symbol') and order.symbol == symbol:
-                        order_type = getattr(order, 'type', '').lower()
+                        order_type = getattr(order, 'order_type', getattr(order, 'type', '')).lower()
                         order_side = getattr(order, 'side', '').lower()
                         stop_price = getattr(order, 'stop_price', None)
                         
@@ -486,7 +486,7 @@ class IntelligentTradingSystem:
                 if symbol_orders:
                     self.logger.critical(f"   📋 Found {len(symbol_orders)} existing orders for {symbol}")
                     for order in symbol_orders:
-                        order_type = getattr(order, 'type', 'unknown')
+                        order_type = getattr(order, 'order_type', getattr(order, 'type', 'unknown'))
                         order_side = getattr(order, 'side', 'unknown')
                         order_qty = getattr(order, 'qty', 'unknown')
                         self.logger.critical(f"      - {order_type} {order_side} {order_qty}")
@@ -610,7 +610,7 @@ class IntelligentTradingSystem:
                 
                 for order in open_orders:
                     if hasattr(order, 'symbol') and order.symbol == symbol:
-                        order_type = getattr(order, 'type', '').lower()
+                        order_type = getattr(order, 'order_type', getattr(order, 'type', '')).lower()
                         order_side = getattr(order, 'side', '').lower()
                         stop_price = getattr(order, 'stop_price', None)
                         
@@ -742,7 +742,7 @@ class IntelligentTradingSystem:
                 limit_orders = []
                 
                 for order in symbol_orders:
-                    order_type = getattr(order, 'type', '').lower()
+                    order_type = getattr(order, 'order_type', getattr(order, 'type', '')).lower()
                     order_side = getattr(order, 'side', '').lower()
                     stop_price = getattr(order, 'stop_price', None)
                     limit_price = getattr(order, 'limit_price', None)
