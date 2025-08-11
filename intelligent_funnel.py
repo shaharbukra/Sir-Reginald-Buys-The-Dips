@@ -540,6 +540,15 @@ class IntelligentMarketFunnel:
                 if any(crypto in symbol.upper() for crypto in crypto_patterns):
                     logger.debug(f"Skipping crypto/forex symbol: {symbol}")
                     continue
+                
+                # Skip invalid or problematic symbols
+                invalid_symbols = ['NDTAF', 'BRK.A', 'BRK.B']  # Common invalid/problematic symbols
+                invalid_patterns = ['.A', '.B', 'TEST', 'TEMP']
+                if (symbol in invalid_symbols or 
+                    any(pattern in symbol for pattern in invalid_patterns) or
+                    len(symbol) > 5 or len(symbol) < 1):
+                    logger.debug(f"Skipping invalid symbol: {symbol}")
+                    continue
                     
                 # Skip if symbol ends with USD (common crypto pattern)
                 if symbol.upper().endswith('USD'):
@@ -1102,6 +1111,15 @@ class IntelligentMarketFunnel:
                         logger.debug(f"🚫 Filtered crypto/forex symbol: {symbol}")
                         continue
                         
+                    # Skip invalid or problematic symbols
+                    invalid_symbols = ['NDTAF', 'BRK.A', 'BRK.B']  # Common invalid/problematic symbols
+                    invalid_patterns = ['.A', '.B', 'TEST', 'TEMP']
+                    if (symbol in invalid_symbols or 
+                        any(pattern in symbol for pattern in invalid_patterns) or
+                        len(symbol) > 5 or len(symbol) < 1):
+                        logger.debug(f"🚫 Filtered invalid symbol: {symbol}")
+                        continue
+                        
                     # Skip if symbol ends with USD (common crypto pattern)
                     if symbol.upper().endswith('USD'):
                         logger.debug(f"🚫 Filtered USD-ending symbol: {symbol}")
@@ -1335,14 +1353,18 @@ class IntelligentMarketFunnel:
                         logger.info(f"🚫 Filtered crypto/forex symbol: {symbol}")
                         continue
                         
+                    # Skip invalid or problematic symbols
+                    invalid_symbols = ['NDTAF', 'BRK.A', 'BRK.B']  # Common invalid/problematic symbols
+                    invalid_patterns = ['.A', '.B', 'TEST', 'TEMP']
+                    if (symbol in invalid_symbols or 
+                        any(pattern in symbol for pattern in invalid_patterns) or
+                        len(symbol) > 5 or len(symbol) < 1):
+                        logger.info(f"🚫 Filtered invalid symbol: {symbol}")
+                        continue
+                        
                     # Skip if symbol ends with USD (common crypto pattern)
                     if symbol.upper().endswith('USD'):
                         logger.info(f"🚫 Filtered USD-ending symbol: {symbol}")
-                        continue
-                        
-                    # Skip if symbol is too long (likely crypto pair)
-                    if len(symbol) > 5:
-                        logger.info(f"🚫 Filtered long symbol: {symbol}")
                         continue
                         
                     processed_symbols.add(symbol)

@@ -498,9 +498,16 @@ class ResilientAlpacaGateway:
                     return mapped_quote
                 return None
             else:
-                # Don't log ERROR for expected failures like VIX on free tier
-                if symbol == 'VIX' and 'no quote found' in str(response.error):
-                    logger.debug(f"Quote not available for {symbol} (expected on free tier)")
+                # Handle expected failures more gracefully
+                error_msg = str(response.error).lower()
+                if 'no quote found' in error_msg or 'not found' in error_msg:
+                    # These are common for invalid symbols or free tier limitations
+                    if symbol in ['VIX', 'NDTAF'] or response.status_code == 404:
+                        logger.debug(f"Quote not available for {symbol} (symbol not found or free tier limitation)")
+                    else:
+                        logger.warning(f"Quote not found for {symbol}: {response.error}")
+                elif 'subscription does not permit' in error_msg or 'sip data unavailable' in error_msg:
+                    logger.debug(f"Quote unavailable for {symbol} (subscription limitation)")
                 else:
                     logger.error(f"Quote request failed for {symbol}: {response.error}")
                 return None
