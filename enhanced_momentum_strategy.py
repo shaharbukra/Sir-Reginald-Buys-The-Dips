@@ -33,6 +33,7 @@ class TradingSignal:
     # Market context
     market_regime: str = "UNKNOWN"
     volatility_environment: str = "NORMAL"
+    atr: Optional[float] = None  # Average True Range for risk management
 
 class EventDrivenMomentumStrategy:
     """
