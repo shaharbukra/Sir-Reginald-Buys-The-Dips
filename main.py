@@ -878,22 +878,40 @@ class IntelligentTradingSystem:
                 
                 # === LOSS MANAGEMENT - PROACTIVE APPROACH ===
                 elif unrealized_pct <= -3.0:  # Earlier intervention than -4% stop
-                    if unrealized_pct <= -5.0:  # Close to emergency threshold
-                        action_needed = {
-                            'type': 'EMERGENCY_REDUCE',
-                            'reduce_pct': 0.75,  # Sell 75% of position
-                            'reason': f'Position at {unrealized_pct:.1f}% loss - emergency reduction',
-                            'urgency': 'CRITICAL'
-                        }
-                        urgency = "CRITICAL"
-                    else:  # -3% to -5% range
-                        action_needed = {
-                            'type': 'DEFENSIVE_REDUCE',
-                            'reduce_pct': 0.50,  # Sell 50% of position
-                            'reason': f'Position at {unrealized_pct:.1f}% loss - defensive reduction',
-                            'urgency': 'HIGH'
-                        }
-                        urgency = "HIGH"
+                    # Check if position already has adequate stop protection before aging actions
+                    has_adequate_protection = False
+                    try:
+                        orders = await self.gateway.get_orders('open')
+                        for order in orders:
+                            if (order.symbol == symbol and 
+                                order.side == ('sell' if qty > 0 else 'buy') and
+                                order.order_type in ['stop', 'stop_limit']):
+                                # Position already has stop protection
+                                has_adequate_protection = True
+                                self.logger.debug(f"✅ {symbol} aging management: already protected by stop order")
+                                break
+                    except Exception as e:
+                        self.logger.debug(f"Could not check protection for {symbol}: {e}")
+                    
+                    if not has_adequate_protection:
+                        if unrealized_pct <= -5.0:  # Close to emergency threshold
+                            action_needed = {
+                                'type': 'EMERGENCY_REDUCE',
+                                'reduce_pct': 0.75,  # Sell 75% of position
+                                'reason': f'Position at {unrealized_pct:.1f}% loss - emergency reduction',
+                                'urgency': 'CRITICAL'
+                            }
+                            urgency = "CRITICAL"
+                        else:  # -3% to -5% range
+                            action_needed = {
+                                'type': 'DEFENSIVE_REDUCE',
+                                'reduce_pct': 0.50,  # Sell 50% of position
+                                'reason': f'Position at {unrealized_pct:.1f}% loss - defensive reduction',
+                                'urgency': 'HIGH'
+                            }
+                            urgency = "HIGH"
+                    else:
+                        self.logger.debug(f"⏭️ SKIPPING AGING ACTION: {symbol} already protected by existing stop order")
                 
                 # === PROFIT OPTIMIZATION - AGING POSITIONS ===
                 elif unrealized_pct >= 8.0:  # Profitable positions
@@ -1773,6 +1791,32 @@ class IntelligentTradingSystem:
             from config import RISK_CONFIG
             max_loss_pct = RISK_CONFIG.get('max_position_loss_pct', -4.0)
             if unrealized_pct <= max_loss_pct:
+                # Check if position already has adequate stop protection before triggering loss cut
+                try:
+                    orders = await self.gateway.get_orders('open')
+                    has_adequate_stop = False
+                    
+                    for order in orders:
+                        if (order.symbol == symbol and 
+                            order.side == ('sell' if qty > 0 else 'buy') and
+                            order.order_type in ['stop', 'stop_limit']):
+                            # Check if existing stop would trigger at or above our threshold
+                            entry_price = float(position.avg_entry_price)
+                            stop_price = float(order.stop_price) if hasattr(order, 'stop_price') else float(order.limit_price)
+                            stop_loss_pct = ((stop_price - entry_price) / entry_price) * 100
+                            
+                            if stop_loss_pct >= max_loss_pct:  # Stop is better than or equal to our threshold
+                                has_adequate_stop = True
+                                self.logger.debug(f"✅ {symbol} already has adequate stop protection at {stop_loss_pct:.1f}%")
+                                break
+                    
+                    if has_adequate_stop:
+                        self.logger.debug(f"⏭️ SKIPPING LOSS CUT: {symbol} already protected by existing stop order")
+                        return  # Skip loss cut - already protected
+                        
+                except Exception as e:
+                    self.logger.debug(f"Could not check existing orders for {symbol}: {e}")
+                
                 self.logger.critical(f"🔴 LOSS CUT TRIGGERED: {symbol} at {unrealized_pct:.1f}% loss (limit: {max_loss_pct}%)")
                 
                 # Execute immediate loss cut with market sell order
