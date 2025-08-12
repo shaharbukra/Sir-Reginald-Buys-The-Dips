@@ -264,12 +264,13 @@ class ResilientAlpacaGateway:
             # Pre-check if this symbol is known to be PDT-blocked
             if hasattr(self, '_pdt_blocked_symbols') and order_data['symbol'] in self._pdt_blocked_symbols:
                 logger.warning(f"Skipping order for {order_data['symbol']} - known PDT violation risk")
-                return None
+                return ApiResponse(success=False, error="Symbol is PDT-blocked")
             
             response = await self._make_request('POST', '/v2/orders', data=order_data)
             if response.success:
                 logger.info(f"Order submitted: {order_data['symbol']} {order_data['side']} {order_data['qty']}")
-                return self._parse_order_data(response.data)
+                order_result = self._parse_order_data(response.data)
+                return ApiResponse(success=True, data=order_result)
             else:
                 # Enhanced error handling for common scenarios
                 if response.status_code == 403 and '40310100' in str(response.error):
@@ -285,10 +286,10 @@ class ResilientAlpacaGateway:
                     logger.debug(f"Order not submitted for {order_data['symbol']} - shares held by existing orders (expected for protected positions)")
                 else:
                     logger.error(f"Order submission failed: {response.error}")
-                return None
+                return response  # Return the failed ApiResponse instead of None
         except Exception as e:
             logger.error(f"Order submission error: {e}")
-            return None
+            return ApiResponse(success=False, error=str(e))
     
     def is_symbol_pdt_blocked(self, symbol: str) -> bool:
         """Check if symbol is currently PDT-blocked"""

@@ -395,8 +395,8 @@ class IntelligentTradingSystem:
                 # Submit order
                 stop_response = await self.gateway.submit_order(emergency_stop_data)
                 
-                if stop_response:
-                    order_id = getattr(stop_response, 'id', 'unknown')
+                if stop_response and stop_response.success:
+                    order_id = getattr(stop_response.data, 'id', 'unknown')
                     self.logger.critical(f"✅ Emergency stop SUCCESSFUL: {symbol} @ ${emergency_stop_data['stop_price']}")
                     self.logger.critical(f"   Order ID: {order_id}, Attempt: {attempt + 1}/{max_retries}")
                     return True
@@ -417,8 +417,8 @@ class IntelligentTradingSystem:
                         self.logger.critical(f"🔄 Trying GTC order for {symbol}: {alternative_data}")
                         gtc_response = await self.gateway.submit_order(alternative_data)
                         
-                        if gtc_response:
-                            order_id = getattr(gtc_response, 'id', 'unknown')
+                        if gtc_response and gtc_response.success:
+                            order_id = getattr(gtc_response.data, 'id', 'unknown')
                             self.logger.critical(f"✅ Emergency stop SUCCESSFUL (GTC): {symbol} (Order: {order_id})")
                             return True
                         
@@ -534,8 +534,8 @@ class IntelligentTradingSystem:
                         
                         liquidation_response = await self.gateway.submit_order(liquidation_data)
                         
-                        if liquidation_response:
-                            order_id = getattr(liquidation_response, 'id', 'unknown')
+                        if liquidation_response and liquidation_response.success:
+                            order_id = getattr(liquidation_response.data, 'id', 'unknown')
                             self.logger.critical(f"✅ LIQUIDATION ORDER SUBMITTED: {symbol} (Order: {order_id})")
                             liquidated_count += 1
                             break
@@ -825,6 +825,232 @@ class IntelligentTradingSystem:
                 f"Could not verify position protection: {e}. Manual check required!"
             )
     
+    async def _enhanced_position_aging_management(self):
+        """Enhanced position aging and turnover management to prevent extended hours emergencies"""
+        try:
+            self.logger.info("⏳ Running enhanced position aging management...")
+            
+            # Get all positions with current market data
+            positions = await self.gateway.get_all_positions()
+            active_positions = [pos for pos in positions if float(pos.qty) != 0]
+            
+            if not active_positions:
+                self.logger.debug("✅ Position aging: No positions to manage")
+                return
+                
+            aging_actions = []
+            current_time = datetime.now()
+            max_age_days = RISK_CONFIG.get('max_position_age_days', 4)
+            concentration_limit = RISK_CONFIG.get('concentration_limit_pct', 8.0)
+            
+            # Get account info for concentration calculations
+            account = await self.gateway.get_account_safe()
+            if not account:
+                self.logger.error("❌ Cannot perform aging management without account data")
+                return
+                
+            account_equity = float(account.equity)
+            
+            for position in active_positions:
+                symbol = position.symbol
+                qty = float(position.qty)
+                market_value = float(position.market_value)
+                unrealized_pl = float(position.unrealized_pl)
+                unrealized_pct = float(position.unrealized_plpc) * 100
+                
+                # Calculate position concentration
+                position_concentration = (abs(market_value) / account_equity) * 100
+                
+                # Get position entry time (approximation - would need persistent storage for exact entry)
+                # For now, use a heuristic approach based on position performance
+                action_needed = None
+                urgency = "LOW"
+                
+                # === CONCENTRATION RISK MANAGEMENT ===
+                if position_concentration > concentration_limit:
+                    action_needed = {
+                        'type': 'REDUCE_CONCENTRATION',
+                        'target_size_pct': concentration_limit * 0.8,  # Reduce to 80% of limit
+                        'reason': f'Position concentration {position_concentration:.1f}% exceeds {concentration_limit}% limit',
+                        'urgency': 'HIGH'
+                    }
+                    urgency = "HIGH"
+                
+                # === LOSS MANAGEMENT - PROACTIVE APPROACH ===
+                elif unrealized_pct <= -3.0:  # Earlier intervention than -4% stop
+                    if unrealized_pct <= -5.0:  # Close to emergency threshold
+                        action_needed = {
+                            'type': 'EMERGENCY_REDUCE',
+                            'reduce_pct': 0.75,  # Sell 75% of position
+                            'reason': f'Position at {unrealized_pct:.1f}% loss - emergency reduction',
+                            'urgency': 'CRITICAL'
+                        }
+                        urgency = "CRITICAL"
+                    else:  # -3% to -5% range
+                        action_needed = {
+                            'type': 'DEFENSIVE_REDUCE',
+                            'reduce_pct': 0.50,  # Sell 50% of position
+                            'reason': f'Position at {unrealized_pct:.1f}% loss - defensive reduction',
+                            'urgency': 'HIGH'
+                        }
+                        urgency = "HIGH"
+                
+                # === PROFIT OPTIMIZATION - AGING POSITIONS ===
+                elif unrealized_pct >= 8.0:  # Profitable positions
+                    # Check if position might be aging (heuristic approach)
+                    if position_concentration > 6.0:  # Large profitable positions
+                        action_needed = {
+                            'type': 'PROFIT_OPTIMIZATION',
+                            'reduce_pct': 0.40,  # Take 40% profit
+                            'reason': f'Large profitable position at +{unrealized_pct:.1f}% - optimize turnover',
+                            'urgency': 'MEDIUM'
+                        }
+                        urgency = "MEDIUM"
+                
+                # === STAGNANT POSITION DETECTION ===
+                elif abs(unrealized_pct) < 2.0 and position_concentration > 5.0:
+                    # Large positions with minimal movement - consider turnover
+                    action_needed = {
+                        'type': 'TURNOVER_OPTIMIZATION',
+                        'reduce_pct': 0.33,  # Reduce by 1/3
+                        'reason': f'Large stagnant position ({unrealized_pct:+.1f}%) - optimize capital allocation',
+                        'urgency': 'LOW'
+                    }
+                
+                if action_needed:
+                    aging_actions.append({
+                        'symbol': symbol,
+                        'qty': qty,
+                        'market_value': market_value,
+                        'unrealized_pct': unrealized_pct,
+                        'concentration_pct': position_concentration,
+                        'action': action_needed,
+                        'urgency': urgency
+                    })
+            
+            # Execute aging management actions based on urgency
+            if aging_actions:
+                self.logger.info(f"📊 Position Aging Analysis: {len(aging_actions)} actions identified")
+                
+                # Sort by urgency (CRITICAL > HIGH > MEDIUM > LOW)
+                urgency_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+                aging_actions.sort(key=lambda x: urgency_order.get(x['urgency'], 4))
+                
+                actions_executed = 0
+                max_actions_per_cycle = 2  # Limit to 2 actions per cycle to avoid over-trading
+                
+                for action_item in aging_actions[:max_actions_per_cycle]:
+                    symbol = action_item['symbol']
+                    qty = action_item['qty']
+                    action = action_item['action']
+                    urgency = action_item['urgency']
+                    
+                    # Calculate sell quantity based on action type
+                    if action['type'] in ['EMERGENCY_REDUCE', 'DEFENSIVE_REDUCE', 'PROFIT_OPTIMIZATION', 'TURNOVER_OPTIMIZATION']:
+                        calculated_qty = abs(qty) * action['reduce_pct']
+                        sell_qty = max(1, int(calculated_qty)) if calculated_qty >= 0.5 else 0
+                        
+                        # EDGE CASE: 1-share positions - handle specially
+                        if abs(qty) == 1:
+                            if action['type'] in ['EMERGENCY_REDUCE']:
+                                # For 1-share emergency, sell the whole share
+                                sell_qty = 1
+                                self.logger.warning(f"   📏 1-SHARE EDGE CASE: {symbol} - selling entire position (emergency)")
+                            else:
+                                # For 1-share non-emergency, skip action to avoid PDT risk
+                                sell_qty = 0
+                                self.logger.info(f"   📏 1-SHARE EDGE CASE: {symbol} - skipping {action['type']} (too small)")
+                                
+                    elif action['type'] == 'REDUCE_CONCENTRATION':
+                        # Calculate quantity to bring position to target size
+                        current_value = abs(action_item['market_value'])
+                        target_value = account_equity * (action['target_size_pct'] / 100)
+                        reduce_value = current_value - target_value
+                        calculated_qty = (reduce_value / current_value) * abs(qty)
+                        sell_qty = max(1, int(calculated_qty)) if calculated_qty >= 0.5 else 0
+                        
+                        # EDGE CASE: 1-share concentration - only act if severely oversized
+                        if abs(qty) == 1:
+                            if action_item['concentration_pct'] > 15.0:  # Only if >15% concentration
+                                sell_qty = 1
+                                self.logger.warning(f"   📏 1-SHARE CONCENTRATION: {symbol} at {action_item['concentration_pct']:.1f}% - selling entire position")
+                            else:
+                                sell_qty = 0
+                                self.logger.info(f"   📏 1-SHARE CONCENTRATION: {symbol} - keeping (only {action_item['concentration_pct']:.1f}%)")
+                    else:
+                        continue
+                        
+                    if sell_qty > 0:
+                        self.logger.warning(f"🔄 POSITION AGING ACTION: {symbol} - {action['type']}")
+                        self.logger.warning(f"   Reason: {action['reason']}")
+                        self.logger.warning(f"   Selling {sell_qty} shares ({(sell_qty/abs(qty)*100):.1f}% of position)")
+                        
+                        # Execute the aging management order
+                        order_data = {
+                            'symbol': symbol,
+                            'qty': str(sell_qty),
+                            'side': 'sell' if qty > 0 else 'buy',
+                            'type': 'market' if urgency in ['CRITICAL', 'HIGH'] else 'limit',
+                            'time_in_force': 'day'
+                        }
+                        
+                        # Add limit price for limit orders
+                        if order_data['type'] == 'limit':
+                            try:
+                                quote = await self.gateway.get_latest_quote(symbol)
+                                if quote:
+                                    current_price = float(quote.get('bid_price', 0))  # Use bid for selling
+                                    if current_price > 0:
+                                        # Use slight discount for quick fill
+                                        limit_price = current_price * 0.995  # 0.5% discount
+                                        order_data['limit_price'] = str(round(limit_price, 2))
+                                    else:
+                                        order_data['type'] = 'market'  # Fallback to market order
+                                else:
+                                    order_data['type'] = 'market'  # Fallback to market order
+                            except:
+                                order_data['type'] = 'market'  # Fallback to market order
+                        
+                        try:
+                            response = await self.gateway.submit_order(order_data)
+                            if response and response.success:
+                                actions_executed += 1
+                                self.logger.warning(f"✅ AGING MANAGEMENT EXECUTED: {symbol} - {action['type']}")
+                                
+                                # Send alert for critical/high urgency actions
+                                if urgency in ['CRITICAL', 'HIGH']:
+                                    await self.alerter.send_alert(
+                                        f"🔄 {urgency}: {symbol} aging management", 
+                                        f"{action['reason']} - sold {sell_qty} shares",
+                                        level='WARNING'
+                                    )
+                            else:
+                                error_msg = response.error if response else "No response received"
+                                # Check if shares are held by existing orders
+                                if response and "insufficient qty available" in str(response.error) and "held_for_orders" in str(response.error):
+                                    self.logger.info(f"✅ AGING MANAGEMENT SKIPPED: {symbol} - shares held by existing orders (protected)")
+                                else:
+                                    self.logger.error(f"❌ AGING MANAGEMENT FAILED: {symbol} - {error_msg}")
+                        except Exception as e:
+                            self.logger.error(f"❌ AGING MANAGEMENT ERROR: {symbol} - {e}")
+                
+                self.logger.info(f"✅ Position aging management complete: {actions_executed}/{len(aging_actions)} actions executed")
+                
+                # Log remaining actions for next cycle
+                if len(aging_actions) > actions_executed:
+                    remaining = len(aging_actions) - actions_executed
+                    self.logger.info(f"📋 {remaining} aging actions deferred to next cycle")
+                    
+            else:
+                self.logger.info("✅ Position aging: All positions within optimal parameters")
+                
+        except Exception as e:
+            self.logger.critical(f"❌ Enhanced position aging management failed: {e}")
+            await self.alerter.send_critical_alert(
+                "CRITICAL: Position aging management failed",
+                f"Could not perform position aging analysis: {e}. Positions may need manual review!"
+            )
+    
     async def _startup_position_reconciliation(self):
         """Reconcile our position understanding with actual broker positions"""
         try:
@@ -1072,6 +1298,21 @@ class IntelligentTradingSystem:
                         await self._periodic_protection_verification()
                     except Exception as e:
                         self.logger.error(f"❌ Periodic protection verification error: {e}")
+                
+                # === ENHANCED POSITION AGING MANAGEMENT (Every 3 loops during market hours) ===
+                # Check market status first
+                market_open = False
+                try:
+                    clock = await self.gateway.get_clock()
+                    market_open = clock.is_open if clock else False
+                except:
+                    market_open = False
+                    
+                if loop_count % 3 == 0 and market_open:  # Run every 3rd loop during market hours
+                    try:
+                        await self._enhanced_position_aging_management()
+                    except Exception as e:
+                        self.logger.error(f"❌ Position aging management error: {e}")
                     
                 # === ADAPTIVE LOOP TIMING ===
                 execution_time = (datetime.now() - loop_start).total_seconds()
@@ -1553,7 +1794,12 @@ class IntelligentTradingSystem:
                         )
                         return  # Exit - position management complete
                     else:
-                        self.logger.error(f"❌ LOSS CUT FAILED: {symbol} order submission failed")
+                        error_msg = response.error if response else "No response received"
+                        # Check if shares are held by existing orders (stop losses)
+                        if response and "insufficient qty available" in str(response.error) and "held_for_orders" in str(response.error):
+                            self.logger.warning(f"✅ LOSS CUT ALREADY PROTECTED: {symbol} - shares held by existing stop orders")
+                        else:
+                            self.logger.error(f"❌ LOSS CUT FAILED: {symbol} - {error_msg}")
                 except Exception as e:
                     self.logger.error(f"❌ LOSS CUT ERROR: {symbol} - {e}")
             
@@ -1568,7 +1814,17 @@ class IntelligentTradingSystem:
                     if not hasattr(self, profit_flag):
                         # Use corresponding percentage for this level
                         profit_pct = profit_percentages[i] if i < len(profit_percentages) else 0.25
-                        sell_qty = int(abs(qty) * profit_pct)
+                        calculated_qty = abs(qty) * profit_pct
+                        sell_qty = max(1, int(calculated_qty)) if calculated_qty >= 0.5 else 0
+                        
+                        # EDGE CASE: 1-share positions - handle profit taking specially
+                        if abs(qty) == 1:
+                            if profit_level >= 15.0:  # Only take profit on 1-share if +15% or higher
+                                sell_qty = 1
+                                self.logger.info(f"   📏 1-SHARE PROFIT: {symbol} at +{unrealized_pct:.1f}% - selling entire position")
+                            else:
+                                sell_qty = 0
+                                self.logger.info(f"   📏 1-SHARE PROFIT: {symbol} at +{unrealized_pct:.1f}% - keeping (threshold not met)")
                         
                         if sell_qty > 0:
                             self.logger.info(f"💰 PROFIT TAKING: {symbol} at +{unrealized_pct:.1f}% - selling {sell_qty} shares ({profit_pct*100}%)")
@@ -1591,7 +1847,12 @@ class IntelligentTradingSystem:
                                         level='INFO'
                                     )
                                 else:
-                                    self.logger.error(f"❌ PROFIT TAKING FAILED: {symbol}")
+                                    error_msg = response.error if response else "No response received"
+                                    # Check if shares are held by existing orders
+                                    if response and "insufficient qty available" in str(response.error) and "held_for_orders" in str(response.error):
+                                        self.logger.info(f"✅ PROFIT TAKING SKIPPED: {symbol} - shares held by existing orders (protected)")
+                                    else:
+                                        self.logger.error(f"❌ PROFIT TAKING FAILED: {symbol} - {error_msg}")
                             except Exception as e:
                                 self.logger.error(f"❌ PROFIT TAKING ERROR: {symbol} - {e}")
             
@@ -1633,11 +1894,11 @@ class IntelligentTradingSystem:
                     continue
                     
                 # Get current price and calculate position value
-                quote = await self.gateway.get_quote(position.symbol)
+                quote = await self.gateway.get_latest_quote(position.symbol)
                 if not quote:
                     continue
                     
-                current_price = float(quote.ask_price if qty > 0 else quote.bid_price)
+                current_price = float(quote.get('ask_price', 0) if qty > 0 else quote.get('bid_price', 0))
                 position_value = abs(qty * current_price)
                 position_pct = position_value / account_value
                 
@@ -1682,7 +1943,12 @@ class IntelligentTradingSystem:
                         alert_msg = f"🔸 {symbol}: Reduced oversized position from {current_pct:.1f}% to target {concentration_limit*100:.1f}%"
                         await self.alerter.send_alert(alert_msg, level='WARNING')
                     else:
-                        self.logger.error(f"❌ Position reduction failed for {symbol}")
+                        error_msg = response.error if response else "No response received"
+                        # Check if shares are held by existing orders
+                        if response and "insufficient qty available" in str(response.error) and "held_for_orders" in str(response.error):
+                            self.logger.info(f"✅ POSITION REDUCTION SKIPPED: {symbol} - shares held by existing orders (protected)")
+                        else:
+                            self.logger.error(f"❌ Position reduction failed for {symbol} - {error_msg}")
                         
         except Exception as e:
             self.logger.error(f"Oversized position check failed: {e}")
@@ -1881,7 +2147,7 @@ class IntelligentTradingSystem:
             # Submit order
             order_response = await self.gateway.submit_order(order_data)
             
-            if order_response:
+            if order_response and order_response.success:
                 # Log comprehensive management action
                 management_log = {
                     'timestamp': datetime.now().isoformat(),
@@ -1894,7 +2160,7 @@ class IntelligentTradingSystem:
                     'reason': action['reason'],
                     'urgency': action['urgency'],
                     'original_qty': current_qty,
-                    'order_id': order_response.id
+                    'order_id': order_response.data.id if order_response.success else 'N/A'
                 }
                 
                 self.logger.info(f"📝 POSITION MANAGEMENT: {json.dumps(management_log, indent=2)}")
@@ -1904,7 +2170,12 @@ class IntelligentTradingSystem:
                 
                 return True
             else:
-                self.logger.error(f"❌ Position management order failed for {symbol}")
+                error_msg = order_response.error if order_response else "No response received"
+                # Check if shares are held by existing orders
+                if order_response and "insufficient qty available" in str(order_response.error) and "held_for_orders" in str(order_response.error):
+                    self.logger.info(f"✅ POSITION MANAGEMENT SKIPPED: {symbol} - shares held by existing orders (protected)")
+                else:
+                    self.logger.error(f"❌ Position management order failed for {symbol} - {error_msg}")
                 return False
                 
         except Exception as e:
@@ -2080,7 +2351,16 @@ class IntelligentTradingSystem:
                                         self.extended_hours_emergency_actions = set()
                                     self.extended_hours_emergency_actions.add(emergency_key)
                                 else:
-                                    self.logger.error(f"❌ EMERGENCY EXTENDED HOURS LOSS CUT FAILED: {symbol}")
+                                    error_msg = response.error if response else "No response received"
+                                    # Check if shares are held by existing orders (stop losses)
+                                    if response and "insufficient qty available" in str(response.error) and "held_for_orders" in str(response.error):
+                                        self.logger.warning(f"✅ EMERGENCY LOSS CUT ALREADY PROTECTED: {symbol} - shares held by existing stop orders")
+                                        # Mark as handled to prevent repeated attempts
+                                        if not hasattr(self, 'extended_hours_emergency_actions'):
+                                            self.extended_hours_emergency_actions = set()
+                                        self.extended_hours_emergency_actions.add(emergency_key)
+                                    else:
+                                        self.logger.error(f"❌ EMERGENCY EXTENDED HOURS LOSS CUT FAILED: {symbol} - {error_msg}")
                             except Exception as e:
                                 self.logger.error(f"❌ EMERGENCY EXTENDED HOURS LOSS CUT ERROR: {symbol} - {e}")
                         
@@ -2511,7 +2791,9 @@ class IntelligentTradingSystem:
             
             # Generate emergency report
             emergency_report = await self._generate_emergency_report(reason)
-            self.logger.critical(f"📊 EMERGENCY REPORT: {json.dumps(emergency_report, indent=2)}")
+            # Convert datetime objects to strings for JSON serialization
+            emergency_report_json = json.dumps(emergency_report, default=str, indent=2)
+            self.logger.critical(f"📊 EMERGENCY REPORT: {emergency_report_json}")
             
             self.running = False
             

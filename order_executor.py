@@ -286,13 +286,13 @@ class SimpleTradeExecutor:
             # Submit bracket order
             order_response = await self.gateway.submit_order(main_order_data)
             
-            if order_response:
+            if order_response and order_response.success:
                 # CRITICAL: Verify bracket order legs are properly created
                 verification_success = await self._verify_bracket_order_legs(order_response, signal)
                 
                 if verification_success:
                     self.active_orders[signal.symbol] = {
-                        'main_order_id': order_response.id,
+                        'main_order_id': order_response.data.id,
                         'signal': signal,
                         'quantity': quantity,
                         'status': 'ACTIVE',
@@ -580,12 +580,12 @@ class SimpleTradeExecutor:
                     
                     order_response = await self.gateway.submit_order(close_order_data)
                     
-                    if order_response:
+                    if order_response and order_response.success:
                         emergency_orders.append({
                             'symbol': position.symbol,
                             'qty': close_qty,
                             'side': side,
-                            'order_id': order_response.id
+                            'order_id': order_response.data.id
                         })
                         
                         logger.critical(f"🚨 Emergency close order: {position.symbol} "
@@ -820,7 +820,7 @@ class SimpleTradeExecutor:
     async def _verify_bracket_order_legs(self, order_response, signal) -> bool:
         """CRITICAL: Verify bracket order legs are properly created"""
         try:
-            order_id = order_response.id
+            order_id = order_response.data.id
             symbol = signal.symbol
             
             logger.info(f"🔍 Verifying bracket order legs for {symbol} (Order ID: {order_id})")
