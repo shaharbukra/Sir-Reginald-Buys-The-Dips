@@ -243,13 +243,15 @@ RISK_CONFIG = {
     'pdt_day_trade_buffer': 1,             # Stay 1 trade under limit
     'account_size_threshold': 25000,       # PDT rule threshold
     
-    # Enhanced Position Management
-    'max_position_loss_pct': -4.0,         # Cut losses at -4%
-    'profit_taking_levels': [6.0, 12.0],   # Take partial profits at +6% and +12%
+    # Enhanced Position Management - OPTIMIZED FOR PROFITABILITY
+    'max_position_loss_pct': -4.0,         # Cut losses at -4% (keep conservative)
+    'profit_taking_levels': [5.0, 10.0, 15.0],  # More granular: +5% (15%), +10% (35%), +15% (50%)
+    'profit_taking_percentages': [0.15, 0.35, 0.50],  # How much to sell at each level
     'position_review_frequency_minutes': 15, # Review positions every 15min
     'trailing_stop_activation_pct': 3.0,   # Activate trailing stop at +3%
-    'max_position_age_days': 5,            # Review old positions after 5 days
-    'concentration_limit_pct': 8.0         # No single position >8%
+    'max_position_age_days': 4,            # Faster turnover - review after 4 days
+    'concentration_limit_pct': 8.0,        # Keep safe concentration limit
+    'extended_hours_emergency_loss_pct': -6.0  # Emergency extended hours threshold
 }
 
 # === AI CONFIGURATION ===

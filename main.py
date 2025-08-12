@@ -1499,11 +1499,19 @@ class IntelligentTradingSystem:
             
             if position_entry_time:
                 hours_held = (datetime.now() - position_entry_time).total_seconds() / 3600
+                days_held = hours_held / 24
                 min_hold_hours = RISK_CONFIG['min_holding_period_hours']
+                max_hold_days = RISK_CONFIG.get('max_position_age_days', 4)
                 
                 if hours_held < min_hold_hours:
                     self.logger.info(f"🕐 {symbol}: Swing trading hold - {hours_held:.1f}h/{min_hold_hours}h minimum")
                     return  # Skip position management - enforce swing trading
+                    
+                # Check for aging positions that need review
+                if days_held >= max_hold_days:
+                    self.logger.warning(f"🕒 {symbol}: Aging position held {days_held:.1f} days (limit: {max_hold_days})")
+                    if unrealized_pct < 2.0:  # If not significantly profitable, consider exit
+                        self.logger.info(f"🕒 {symbol}: Aging position with low profit (+{unrealized_pct:.1f}%) - will be managed more aggressively")
             else:
                 # If we can't find entry time, assume it's been held long enough (existing position)
                 self.logger.debug(f"📊 {symbol}: No entry time found, assuming swing trade eligible")
@@ -1549,15 +1557,17 @@ class IntelligentTradingSystem:
                 except Exception as e:
                     self.logger.error(f"❌ LOSS CUT ERROR: {symbol} - {e}")
             
-            # Check for profit taking opportunities
-            profit_levels = RISK_CONFIG.get('profit_taking_levels', [6.0, 12.0])
-            for profit_level in profit_levels:
+            # Check for profit taking opportunities - ENHANCED GRANULAR SYSTEM
+            profit_levels = RISK_CONFIG.get('profit_taking_levels', [5.0, 10.0, 15.0])
+            profit_percentages = RISK_CONFIG.get('profit_taking_percentages', [0.15, 0.35, 0.50])
+            
+            for i, profit_level in enumerate(profit_levels):
                 if unrealized_pct >= profit_level:
                     # Only take profit if we haven't already done so at this level
                     profit_flag = f'_{symbol}_profit_{int(profit_level)}_taken'
                     if not hasattr(self, profit_flag):
-                        # Take partial profit (25% at 6%, 50% at 12%)
-                        profit_pct = 0.25 if profit_level <= 6.0 else 0.50
+                        # Use corresponding percentage for this level
+                        profit_pct = profit_percentages[i] if i < len(profit_percentages) else 0.25
                         sell_qty = int(abs(qty) * profit_pct)
                         
                         if sell_qty > 0:
@@ -2036,6 +2046,38 @@ class IntelligentTradingSystem:
                             self.extended_hours_warnings_sent.add(warning_key)
                         else:
                             self.logger.debug(f"🔇 Extended hours risk warning suppressed for {symbol} (already warned)")
+                    
+                    # EMERGENCY EXTENDED HOURS LOSS CUTTING - For severe losses
+                    if unrealized_pct <= -6.0:  # Emergency threshold for extended hours
+                        emergency_key = f"{symbol}_emergency_{int(unrealized_pct)}"
+                        if emergency_key not in getattr(self, 'extended_hours_emergency_actions', set()):
+                            self.logger.critical(f"🚨 EMERGENCY EXTENDED HOURS LOSS CUT: {symbol} at {unrealized_pct:.1f}% loss")
+                            
+                            try:
+                                # Execute emergency market sell order
+                                order_data = {
+                                    'symbol': symbol,
+                                    'qty': str(int(abs(qty))),
+                                    'side': 'sell' if qty > 0 else 'buy',
+                                    'type': 'market',
+                                    'time_in_force': 'day'
+                                }
+                                
+                                response = await self.gateway.submit_order(order_data)
+                                if response and response.success:
+                                    self.logger.critical(f"✅ EMERGENCY LOSS CUT EXECUTED: {symbol} - sold {int(abs(qty))} shares at {unrealized_pct:.1f}% loss")
+                                    await self.alerter.send_alert(
+                                        f"🚨 EMERGENCY EXTENDED HOURS LOSS CUT: {symbol} sold at {unrealized_pct:.1f}% loss",
+                                        level='CRITICAL'
+                                    )
+                                    # Track this emergency action
+                                    if not hasattr(self, 'extended_hours_emergency_actions'):
+                                        self.extended_hours_emergency_actions = set()
+                                    self.extended_hours_emergency_actions.add(emergency_key)
+                                else:
+                                    self.logger.error(f"❌ EMERGENCY EXTENDED HOURS LOSS CUT FAILED: {symbol}")
+                            except Exception as e:
+                                self.logger.error(f"❌ EMERGENCY EXTENDED HOURS LOSS CUT ERROR: {symbol} - {e}")
                         
                 except Exception as pos_error:
                     self.logger.error(f"Extended hours monitoring failed for {position.symbol}: {pos_error}")
