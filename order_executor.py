@@ -640,6 +640,31 @@ class SimpleTradeExecutor:
             side = 'sell' if qty > 0 else 'buy'
             close_qty = abs(int(qty))
             
+            # First, cancel any existing orders for this symbol that might be holding shares
+            logger.critical(f"🚨 EMERGENCY STOP: Cancelling existing orders for {symbol}")
+            try:
+                open_orders = await self.gateway.get_orders('open')
+                cancelled_orders = 0
+                for order in open_orders:
+                    if hasattr(order, 'symbol') and order.symbol == symbol:
+                        cancel_response = await self.gateway.cancel_order(order.id)
+                        if cancel_response and cancel_response.success:
+                            cancelled_orders += 1
+                            logger.critical(f"✅ Cancelled order {order.id} for {symbol}")
+                        else:
+                            logger.warning(f"⚠️ Failed to cancel order {order.id} for {symbol}")
+                
+                if cancelled_orders > 0:
+                    logger.critical(f"🧹 Cancelled {cancelled_orders} existing orders for {symbol}")
+                    # Brief delay to ensure orders are cancelled before placing new one
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.critical(f"ℹ️ No existing orders to cancel for {symbol}")
+                    
+            except Exception as cancel_error:
+                logger.error(f"Failed to cancel existing orders for {symbol}: {cancel_error}")
+            
+            # Now place emergency market order
             emergency_order_data = {
                 'symbol': symbol,
                 'qty': str(close_qty),
