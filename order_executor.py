@@ -650,10 +650,11 @@ class SimpleTradeExecutor:
             
             order_response = await self.gateway.submit_order(emergency_order_data)
             
-            if order_response:
+            if order_response and order_response.success:
                 logger.critical(f"🚨 EMERGENCY STOP EXECUTED: {symbol} {side} {close_qty} @ market")
             else:
-                logger.critical(f"❌ EMERGENCY STOP FAILED: {symbol}")
+                error_msg = order_response.error if order_response else "No response received"
+                logger.critical(f"❌ EMERGENCY STOP FAILED: {symbol} - {error_msg}")
                 
         except Exception as e:
             logger.critical(f"Emergency stop execution failed: {e}")
@@ -972,12 +973,13 @@ class SimpleTradeExecutor:
             
             stop_order_response = await self.gateway.submit_order(emergency_stop_data)
             
-            if stop_order_response:
+            if stop_order_response and stop_order_response.success:
                 logger.critical(f"✅ Emergency stop loss created: {symbol} @ ${signal.stop_loss_price:.2f}")
                 return True
             else:
                 # Enhanced error logging - check if it's a PDT or account issue
-                logger.critical(f"❌ Failed to create emergency stop loss for {symbol}")
+                error_msg = stop_order_response.error if stop_order_response else "No response received"
+                logger.critical(f"❌ Failed to create emergency stop loss for {symbol} - {error_msg}")
                 logger.critical(f"   Stop loss details: {emergency_stop_data}")
                 logger.critical(f"   Signal stop price: ${signal.stop_loss_price:.2f}")
                 logger.critical(f"   Filled quantity: {filled_qty}")
@@ -1058,11 +1060,12 @@ class SimpleTradeExecutor:
                 try:
                     liquidation_response = await self.gateway.submit_order(emergency_liquidation_data)
                     
-                    if liquidation_response:
+                    if liquidation_response and liquidation_response.success:
                         logger.critical(f"🚨 EMERGENCY LIQUIDATION EXECUTED: {symbol} {side} {close_qty} (attempt {attempt + 1})")
                         return True
                     else:
-                        logger.critical(f"❌ EMERGENCY LIQUIDATION ATTEMPT {attempt + 1} FAILED: {symbol}")
+                        error_msg = liquidation_response.error if liquidation_response else "No response received"
+                        logger.critical(f"❌ EMERGENCY LIQUIDATION ATTEMPT {attempt + 1} FAILED: {symbol} - {error_msg}")
                         
                 except Exception as liquidation_error:
                     error_msg = str(liquidation_error)
@@ -1574,7 +1577,7 @@ class SimpleTradeExecutor:
                     for order in open_orders:
                         if hasattr(order, 'symbol') and order.symbol == symbol:
                             cancel_response = await self.gateway.cancel_order(order.id)
-                            if cancel_response:
+                            if cancel_response and cancel_response.success:
                                 orders_cancelled += 1
                                 logger.info(f"🧹 Cancelled pending order for {symbol}: {order.id}")
                     
@@ -1602,11 +1605,12 @@ class SimpleTradeExecutor:
             }
             
             stop_response = await self.gateway.submit_order(emergency_stop_data)
-            if stop_response:
+            if stop_response and stop_response.success:
                 logger.critical(f"✅ Emergency stop loss created: {symbol} @ ${signal.stop_loss_price:.2f}")
                 protection_orders_created += 1
             else:
-                logger.critical(f"❌ Failed to create emergency stop loss for {symbol}")
+                error_msg = stop_response.error if stop_response else "No response received"
+                logger.critical(f"❌ Failed to create emergency stop loss for {symbol} - {error_msg}")
             
             # 2. Emergency take profit (secondary protection)
             try:
@@ -1620,11 +1624,12 @@ class SimpleTradeExecutor:
                 }
                 
                 profit_response = await self.gateway.submit_order(emergency_profit_data)
-                if profit_response:
+                if profit_response and profit_response.success:
                     logger.critical(f"✅ Emergency take profit created: {symbol} @ ${signal.take_profit_price:.2f}")
                     protection_orders_created += 1
                 else:
-                    logger.warning(f"⚠️ Failed to create emergency take profit for {symbol}")
+                    error_msg = profit_response.error if profit_response else "No response received"
+                    logger.warning(f"⚠️ Failed to create emergency take profit for {symbol} - {error_msg}")
             except Exception as profit_error:
                 logger.warning(f"Emergency take profit creation failed for {symbol}: {profit_error}")
             
