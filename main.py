@@ -2054,20 +2054,25 @@ class IntelligentTradingSystem:
                             self.logger.critical(f"🚨 EMERGENCY EXTENDED HOURS LOSS CUT: {symbol} at {unrealized_pct:.1f}% loss")
                             
                             try:
-                                # Execute emergency market sell order
+                                # Execute emergency sell order (limit order for extended hours)
+                                current_price = float(position.market_value) / abs(qty)  # Calculate current price
+                                # Use limit order with 1% discount for extended hours execution
+                                limit_price = current_price * 0.99 if qty > 0 else current_price * 1.01
+                                
                                 order_data = {
                                     'symbol': symbol,
                                     'qty': str(int(abs(qty))),
                                     'side': 'sell' if qty > 0 else 'buy',
-                                    'type': 'market',
+                                    'type': 'limit',  # Use limit order for extended hours
+                                    'limit_price': str(round(limit_price, 2)),
                                     'time_in_force': 'day'
                                 }
                                 
                                 response = await self.gateway.submit_order(order_data)
                                 if response and response.success:
-                                    self.logger.critical(f"✅ EMERGENCY LOSS CUT EXECUTED: {symbol} - sold {int(abs(qty))} shares at {unrealized_pct:.1f}% loss")
+                                    self.logger.critical(f"✅ EMERGENCY LOSS CUT EXECUTED: {symbol} - limit sell {int(abs(qty))} shares @ ${limit_price:.2f} (at {unrealized_pct:.1f}% loss)")
                                     await self.alerter.send_alert(
-                                        f"🚨 EMERGENCY EXTENDED HOURS LOSS CUT: {symbol} sold at {unrealized_pct:.1f}% loss",
+                                        f"🚨 EMERGENCY EXTENDED HOURS LOSS CUT: {symbol} limit sell @ ${limit_price:.2f} at {unrealized_pct:.1f}% loss",
                                         level='CRITICAL'
                                     )
                                     # Track this emergency action
