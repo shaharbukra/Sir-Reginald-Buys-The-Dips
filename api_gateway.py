@@ -120,7 +120,7 @@ class ResilientAlpacaGateway:
                 # Handle rate limiting
                 rate_limit_remaining = response.headers.get('X-RateLimit-Remaining')
                 
-                if response.status == 200:
+                if response.status in [200, 201, 204]:  # Include 201 (Created) and 204 (No Content) as success
                     self.last_successful_request = datetime.now()
                     self.consecutive_failures = 0
                     
@@ -312,13 +312,13 @@ class ResilientAlpacaGateway:
             response = await self._make_request('DELETE', f'/v2/orders/{order_id}')
             if response.success:
                 logger.info(f"Order {order_id} cancelled")
-                return True
+                return response
             else:
                 logger.error(f"Order cancellation failed: {response.error}")
-                return False
+                return response
         except Exception as e:
             logger.error(f"Order cancellation error: {e}")
-            return False
+            return ApiResponse(success=False, error=str(e))
             
     async def cancel_all_orders(self):
         """Cancel all pending orders"""
