@@ -378,9 +378,56 @@ class IntelligentTradingSystem:
         except Exception as e:
             self.logger.error(f"Emergency stop creation failed: {e}")
     
+    async def _should_skip_emergency_stop(self, symbol: str) -> str:
+        """Check if emergency stop should be skipped and return reason"""
+        try:
+            # Check market hours
+            try:
+                clock = await self.gateway.get_clock()
+                if clock and hasattr(clock, 'is_open') and not clock.is_open:
+                    return "Market is CLOSED - emergency stops cannot be placed"
+            except Exception as e:
+                self.logger.warning(f"Could not check market status: {e}")
+            
+            # Check for existing orders that indicate position is already being handled
+            try:
+                existing_orders = await self.gateway.get_orders('open')
+                symbol_orders = [o for o in existing_orders if hasattr(o, 'symbol') and o.symbol == symbol]
+                
+                for order in symbol_orders:
+                    order_type = getattr(order, 'order_type', getattr(order, 'type', 'unknown'))
+                    order_side = getattr(order, 'side', 'unknown')
+                    
+                    # Check if there's already a market sell order (liquidation in progress)
+                    if order_type == 'market' and order_side == 'sell':
+                        return f"Position already being liquidated (existing market sell order)"
+                    
+                    # Check if there's already a stop order for protection
+                    if order_type in ['stop', 'stop_limit'] and order_side == 'sell':
+                        return f"Position already protected (existing {order_type} order)"
+                        
+            except Exception as e:
+                self.logger.warning(f"Could not check existing orders for {symbol}: {e}")
+            
+            # Check if symbol is PDT-blocked
+            if self.gateway.is_symbol_pdt_blocked(symbol):
+                return "Symbol is PDT-blocked"
+                
+            return None  # No reason to skip
+            
+        except Exception as e:
+            self.logger.error(f"Error checking if emergency stop should be skipped for {symbol}: {e}")
+            return None
+    
     async def _create_emergency_stop_with_retry(self, symbol: str, emergency_stop_data: Dict, max_retries: int = 5) -> bool:
         """Create emergency stop with robust retry logic and escalating responses"""
         import asyncio
+        
+        # Pre-flight checks before attempting emergency stop
+        skip_reason = await self._should_skip_emergency_stop(symbol)
+        if skip_reason:
+            self.logger.critical(f"⏭️ SKIPPING emergency stop for {symbol}: {skip_reason}")
+            return True  # Return True since position is already protected or handled
         
         for attempt in range(max_retries):
             try:
@@ -620,8 +667,15 @@ class IntelligentTradingSystem:
                                              ((position_side == 'long' and order_side == 'sell') or
                                               (position_side == 'short' and order_side == 'buy')))
                         
-                        if is_stop or is_protective_limit:
+                        # Check for market liquidation orders (active protection)
+                        is_market_liquidation = (order_type == 'market' and
+                                               ((position_side == 'long' and order_side == 'sell') or
+                                                (position_side == 'short' and order_side == 'buy')))
+                        
+                        if is_stop or is_protective_limit or is_market_liquidation:
                             has_protection = True
+                            if is_market_liquidation:
+                                self.logger.debug(f"✅ {symbol} protected by active market liquidation order")
                             break
                 
                 if not has_protection:
