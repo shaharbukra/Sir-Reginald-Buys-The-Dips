@@ -433,6 +433,31 @@ class IntelligentTradingSystem:
             self.logger.error(f"Error checking if emergency stop should be skipped for {symbol}: {e}")
             return None
     
+    async def _check_actual_open_orders_for_symbol(self, symbol: str) -> bool:
+        """Check if there are actually open orders for a symbol that would hold shares"""
+        try:
+            open_orders = await self.gateway.get_orders(status='open')
+            if not open_orders:
+                return False
+                
+            symbol_orders = [order for order in open_orders if getattr(order, 'symbol', None) == symbol]
+            
+            if symbol_orders:
+                self.logger.info(f"🔍 Found {len(symbol_orders)} open orders for {symbol}")
+                for order in symbol_orders:
+                    order_type = getattr(order, 'type', 'unknown')
+                    side = getattr(order, 'side', 'unknown') 
+                    status = getattr(order, 'status', 'unknown')
+                    self.logger.info(f"   - {order_type} {side} order, status: {status}")
+                return True
+            else:
+                self.logger.info(f"🔍 No open orders found for {symbol} - shares should be available")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"Error checking orders for {symbol}: {e}")
+            return True  # Conservative: assume orders exist if we can't check
+    
     async def _create_emergency_stop_with_retry(self, symbol: str, emergency_stop_data: Dict, max_retries: int = 5) -> bool:
         """Create emergency stop with robust retry logic and escalating responses"""
         import asyncio
@@ -1114,7 +1139,12 @@ class IntelligentTradingSystem:
                                 error_msg = response.error if response else "No response received"
                                 # Check if shares are held by existing orders
                                 if response and "insufficient qty available" in str(response.error) and "held_for_orders" in str(response.error):
-                                    self.logger.info(f"✅ AGING MANAGEMENT SKIPPED: {symbol} - shares held by existing orders (protected)")
+                                    # Verify if orders actually exist before skipping permanently
+                                    orders_exist = await self._check_actual_open_orders_for_symbol(symbol)
+                                    if orders_exist:
+                                        self.logger.info(f"✅ AGING MANAGEMENT SKIPPED: {symbol} - shares held by existing orders (protected)")
+                                    else:
+                                        self.logger.warning(f"🔄 AGING MANAGEMENT RETRY: {symbol} - 'held_for_orders' error but no open orders found, will retry next cycle")
                                 else:
                                     self.logger.error(f"❌ AGING MANAGEMENT FAILED: {symbol} - {error_msg}")
                         except Exception as e:
@@ -1962,7 +1992,12 @@ class IntelligentTradingSystem:
                                     error_msg = response.error if response else "No response received"
                                     # Check if shares are held by existing orders
                                     if response and "insufficient qty available" in str(response.error) and "held_for_orders" in str(response.error):
-                                        self.logger.info(f"✅ PROFIT TAKING SKIPPED: {symbol} - shares held by existing orders (protected)")
+                                        # Verify if orders actually exist before skipping permanently
+                                        orders_exist = await self._check_actual_open_orders_for_symbol(symbol)
+                                        if orders_exist:
+                                            self.logger.info(f"✅ PROFIT TAKING SKIPPED: {symbol} - shares held by existing orders (protected)")
+                                        else:
+                                            self.logger.warning(f"🔄 PROFIT TAKING RETRY: {symbol} - 'held_for_orders' error but no open orders found, will retry next cycle")
                                     else:
                                         self.logger.error(f"❌ PROFIT TAKING FAILED: {symbol} - {error_msg}")
                             except Exception as e:
@@ -2058,7 +2093,12 @@ class IntelligentTradingSystem:
                         error_msg = response.error if response else "No response received"
                         # Check if shares are held by existing orders
                         if response and "insufficient qty available" in str(response.error) and "held_for_orders" in str(response.error):
-                            self.logger.info(f"✅ POSITION REDUCTION SKIPPED: {symbol} - shares held by existing orders (protected)")
+                            # Verify if orders actually exist before skipping permanently
+                            orders_exist = await self._check_actual_open_orders_for_symbol(symbol)
+                            if orders_exist:
+                                self.logger.info(f"✅ POSITION REDUCTION SKIPPED: {symbol} - shares held by existing orders (protected)")
+                            else:
+                                self.logger.warning(f"🔄 POSITION REDUCTION RETRY: {symbol} - 'held_for_orders' error but no open orders found, will retry next cycle")
                         else:
                             self.logger.error(f"❌ Position reduction failed for {symbol} - {error_msg}")
                         
