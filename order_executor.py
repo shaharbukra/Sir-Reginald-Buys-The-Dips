@@ -1634,7 +1634,7 @@ class SimpleTradeExecutor:
                 except Exception as cleanup_error:
                     logger.error(f"Failed to clean up orders for {symbol}: {cleanup_error}")
                 
-                return True  # No position means no risk, so emergency protection is technically successful
+                return False  # No position means the trade failed to execute
             
             actual_qty = abs(int(float(actual_position.qty)))
             logger.critical(f"📊 Found {symbol} position: {actual_qty} shares - creating protection")

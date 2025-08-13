@@ -466,7 +466,8 @@ class IntelligentTradingSystem:
         skip_reason = await self._should_skip_emergency_stop(symbol)
         if skip_reason:
             self.logger.critical(f"⏭️ SKIPPING emergency stop for {symbol}: {skip_reason}")
-            return True  # Return True since position is already protected or handled
+            # Return False if market is closed (can't create protection), True if already protected
+            return not ("Market is CLOSED" in skip_reason)
         
         for attempt in range(max_retries):
             try:
@@ -1130,10 +1131,8 @@ class IntelligentTradingSystem:
                                 
                                 # Send alert for critical/high urgency actions
                                 if urgency in ['CRITICAL', 'HIGH']:
-                                    await self.alerter.send_alert(
-                                        f"🔄 {urgency}: {symbol} aging management", 
-                                        f"{action['reason']} - sold {sell_qty} shares",
-                                        level='WARNING'
+                                    await self.alerter.send_critical_alert(
+                                        f"🔄 {urgency}: {symbol} aging management - {action['reason']} - sold {sell_qty} shares"
                                     )
                             else:
                                 error_msg = response.error if response else "No response received"
@@ -1930,9 +1929,8 @@ class IntelligentTradingSystem:
                     response = await self.gateway.submit_order(order_data)
                     if response and response.success:
                         self.logger.critical(f"✅ LOSS CUT EXECUTED: {symbol} - sold {int(abs(qty))} shares at {unrealized_pct:.1f}% loss")
-                        await self.alerter.send_alert(
-                            f"🔴 LOSS CUT: {symbol} sold at {unrealized_pct:.1f}% loss", 
-                            level='CRITICAL'
+                        await self.alerter.send_critical_alert(
+                            f"🔴 LOSS CUT: {symbol} sold at {unrealized_pct:.1f}% loss"
                         )
                         return  # Exit - position management complete
                     else:
@@ -1984,9 +1982,8 @@ class IntelligentTradingSystem:
                                 if response and response.success:
                                     self.logger.info(f"✅ PROFIT TAKEN: {symbol} - sold {sell_qty} shares at +{unrealized_pct:.1f}%")
                                     setattr(self, profit_flag, True)
-                                    await self.alerter.send_alert(
-                                        f"💰 PROFIT TAKEN: {symbol} partial sale at +{unrealized_pct:.1f}%",
-                                        level='INFO'
+                                    await self.alerter.send_critical_alert(
+                                        f"💰 PROFIT TAKEN: {symbol} partial sale at +{unrealized_pct:.1f}%"
                                     )
                                 else:
                                     error_msg = response.error if response else "No response received"
@@ -2088,7 +2085,7 @@ class IntelligentTradingSystem:
                         
                         # Send alert about position reduction
                         alert_msg = f"🔸 {symbol}: Reduced oversized position from {current_pct:.1f}% to target {concentration_limit*100:.1f}%"
-                        await self.alerter.send_alert(alert_msg, level='WARNING')
+                        await self.alerter.send_critical_alert(alert_msg)
                     else:
                         error_msg = response.error if response else "No response received"
                         # Check if shares are held by existing orders
@@ -2494,9 +2491,8 @@ class IntelligentTradingSystem:
                                 response = await self.gateway.submit_order(order_data)
                                 if response and response.success:
                                     self.logger.critical(f"✅ EMERGENCY LOSS CUT EXECUTED: {symbol} - limit sell {int(abs(qty))} shares @ ${limit_price:.2f} (at {unrealized_pct:.1f}% loss)")
-                                    await self.alerter.send_alert(
-                                        f"🚨 EMERGENCY EXTENDED HOURS LOSS CUT: {symbol} limit sell @ ${limit_price:.2f} at {unrealized_pct:.1f}% loss",
-                                        level='CRITICAL'
+                                    await self.alerter.send_critical_alert(
+                                        f"🚨 EMERGENCY EXTENDED HOURS LOSS CUT: {symbol} limit sell @ ${limit_price:.2f} at {unrealized_pct:.1f}% loss"
                                     )
                                     # Track this emergency action
                                     if not hasattr(self, 'extended_hours_emergency_actions'):
