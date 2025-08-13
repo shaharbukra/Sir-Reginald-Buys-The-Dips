@@ -986,6 +986,28 @@ class SimpleTradeExecutor:
                     stop_price = getattr(stop, 'stop_price', 'unknown')
                     logger.critical(f"   - Stop loss: {stop.qty} shares @ ${stop_price}")
                 return True  # Stop loss already exists
+                
+            # SECOND: Cancel conflicting orders that might be holding shares
+            symbol_orders = [o for o in open_orders if hasattr(o, 'symbol') and o.symbol == symbol]
+            if symbol_orders:
+                logger.critical(f"🚨 Found {len(symbol_orders)} existing orders for {symbol} - cancelling to free shares")
+                for order in symbol_orders:
+                    try:
+                        order_type = getattr(order, 'order_type', getattr(order, 'type', 'unknown'))
+                        order_side = getattr(order, 'side', 'unknown')
+                        order_qty = getattr(order, 'qty', 'unknown')
+                        logger.critical(f"   Cancelling: {order_type} {order_side} {order_qty}")
+                        
+                        cancel_response = await self.gateway.cancel_order(order.id)
+                        if cancel_response and cancel_response.success:
+                            logger.critical(f"   ✅ Cancelled order {order.id}")
+                        else:
+                            logger.critical(f"   ❌ Failed to cancel order {order.id}")
+                    except Exception as cancel_error:
+                        logger.critical(f"   ⚠️ Error cancelling order: {cancel_error}")
+                        
+                # Wait a moment for cancellations to process
+                await asyncio.sleep(1)
             
             emergency_stop_data = {
                 'symbol': symbol,
