@@ -363,31 +363,46 @@ class IntelligentTradingSystem:
             if unprotected_count > 0:
                 self.logger.critical(f"🚨 CRITICAL: {unprotected_count} positions remain without stop protection")
                 
-                # CRITICAL DECISION: If all emergency stops failed, initiate emergency liquidation
+                # CRITICAL DECISION: If all emergency stops failed, check if it's due to market closure
                 if stops_created == 0 and len(naked_positions) > 0:
-                    self.logger.critical(f"🚨 EMERGENCY LIQUIDATION DECISION: ALL emergency stops failed")
-                    self.logger.critical(f"   This indicates serious API/connectivity issues")
-                    self.logger.critical(f"   Positions are exposed to unlimited risk")
-                    self.logger.critical(f"   Initiating emergency liquidation protocol...")
+                    liquidated_positions = 0  # Initialize for both branches
+                    # Check if market is closed - if so, this is NOT an emergency
+                    try:
+                        clock = await self.gateway.get_clock()
+                        market_is_open = clock and hasattr(clock, 'is_open') and clock.is_open
+                    except Exception as e:
+                        self.logger.warning(f"Could not check market status: {e}")
+                        market_is_open = False  # Conservative: assume closed if can't check
                     
-                    await self.alerter.send_critical_alert(
-                        "EMERGENCY LIQUIDATION: All stops failed",
-                        f"ALL {len(naked_positions)} emergency stops failed. Initiating emergency liquidation to prevent unlimited losses. "
-                        f"Positions: {[pos['symbol'] for pos in naked_positions]}"
-                    )
-                    
-                    # Execute emergency liquidation
-                    liquidated_positions = await self._execute_emergency_liquidation(naked_positions)
-                    
-                    if liquidated_positions > 0:
-                        self.logger.critical(f"✅ Emergency liquidation completed: {liquidated_positions}/{len(naked_positions)} positions closed")
+                    if not market_is_open:
+                        self.logger.critical(f"🌙 MARKET CLOSED: Emergency stops cannot be placed during closed market hours")
+                        self.logger.critical(f"   {unprotected_count} positions will remain unprotected until market opens")
+                        self.logger.critical(f"   This is NORMAL - no emergency liquidation needed")
+                        self.logger.critical(f"   Positions will be protected when market reopens")
                     else:
-                        self.logger.critical(f"❌ EMERGENCY LIQUIDATION FAILED: No positions could be closed!")
+                        self.logger.critical(f"🚨 EMERGENCY LIQUIDATION DECISION: ALL emergency stops failed during OPEN market")
+                        self.logger.critical(f"   This indicates serious API/connectivity issues")
+                        self.logger.critical(f"   Positions are exposed to unlimited risk")
+                        self.logger.critical(f"   Initiating emergency liquidation protocol...")
+                        
                         await self.alerter.send_critical_alert(
-                            "CRITICAL: Emergency liquidation failed",
-                            f"Could not liquidate ANY of {len(naked_positions)} unprotected positions. "
-                            f"System shutdown required. Manual intervention critical!"
+                            "EMERGENCY LIQUIDATION: All stops failed",
+                            f"ALL {len(naked_positions)} emergency stops failed. Initiating emergency liquidation to prevent unlimited losses. "
+                            f"Positions: {[pos['symbol'] for pos in naked_positions]}"
                         )
+                        
+                        # Execute emergency liquidation
+                        liquidated_positions = await self._execute_emergency_liquidation(naked_positions)
+                        
+                        if liquidated_positions > 0:
+                            self.logger.critical(f"✅ Emergency liquidation completed: {liquidated_positions}/{len(naked_positions)} positions closed")
+                        else:
+                            self.logger.critical(f"❌ EMERGENCY LIQUIDATION FAILED: No positions could be closed!")
+                            await self.alerter.send_critical_alert(
+                                "CRITICAL: Emergency liquidation failed",
+                                f"Could not liquidate ANY of {len(naked_positions)} unprotected positions. "
+                                f"System shutdown required. Manual intervention critical!"
+                            )
                 
         except Exception as e:
             self.logger.error(f"Emergency stop creation failed: {e}")
