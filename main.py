@@ -251,12 +251,26 @@ class IntelligentTradingSystem:
                              (position_side == 'short' and order_side == 'buy'))
                         )
                         
-                        is_protective = is_protective_stop or is_take_profit
+                        # Check for market liquidation orders (active protection)
+                        is_market_liquidation = (
+                            order_type == 'market' and
+                            ((position_side == 'long' and order_side == 'sell') or
+                             (position_side == 'short' and order_side == 'buy'))
+                        )
+                        
+                        is_protective = is_protective_stop or is_take_profit or is_market_liquidation
                         
                         if is_protective:
                             limit_price = getattr(order, 'limit_price', None)
-                            price_info = f"${stop_price}" if stop_price else f"${limit_price}" if limit_price else "no price"
-                            protection_type = "STOP" if is_protective_stop else "TAKE-PROFIT"
+                            price_info = f"${stop_price}" if stop_price else f"${limit_price}" if limit_price else "market price"
+                            
+                            if is_protective_stop:
+                                protection_type = "STOP"
+                            elif is_market_liquidation:
+                                protection_type = "MARKET LIQUIDATION"
+                            else:
+                                protection_type = "TAKE-PROFIT"
+                            
                             protective_orders.append(f"{protection_type}: {order_type} {order_side} @ {price_info}")
                             has_stop_protection = True
                 
