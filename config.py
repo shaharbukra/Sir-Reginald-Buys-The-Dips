@@ -60,7 +60,7 @@ FUNNEL_CONFIG = {
     
     # Broad scan parameters
     'max_broad_scan_results': 500,     # Max candidates from Step 1 - increased for comprehensive scanning
-    'broad_scan_frequency_minutes': 15, # Full scan every 15 minutes
+    'broad_scan_frequency_minutes': 10, # Full scan every 10 minutes - ACCELERATED for recovery
     'broad_scan_api_budget': 5,        # Max API calls for broad scan
     
     # Step 2: AI Filtering (0 API calls - pure logic)
@@ -84,7 +84,7 @@ FUNNEL_CONFIG = {
     
     # Final selection
     'max_watchlist_size': 25,          # Dynamic watchlist size
-    'max_active_positions': 8,         # Concurrent positions
+    'max_active_positions': 12,        # Concurrent positions - INCREASED for faster recovery
     'opportunity_refresh_minutes': 5   # Update rankings every 5 min
 }
 
@@ -103,7 +103,7 @@ SCREENING_CRITERIA = {
         MarketRegime.BULL_TRENDING: {
             'focus_on': 'gainers',
             'min_daily_change': -0.5,  # Allow small dips for better entries
-            'min_volume_ratio': 1.1,   # Further lowered for more opportunities
+            'min_volume_ratio': 0.9,   # LOWERED for recovery (was 1.1)
             'preferred_sectors': ['TECHNOLOGY', 'GROWTH', 'CONSUMER_DISCRETIONARY', 'EQUITY'],
             'avoid_sectors': ['UTILITIES', 'DEFENSIVE'],
             'max_position_size_pct': 8.0  # Reduce max position size to 8%
@@ -138,7 +138,7 @@ SCREENING_CRITERIA = {
             'volume_expansion_required': True,
             'technical_breakout_required': True,
             'max_position_size_pct': 8.0,      # Consistent position sizing
-            'min_volume_ratio': 1.3             # Lower threshold for more signals
+            'min_volume_ratio': 0.8             # AGGRESSIVE threshold for maximum signals
         }
     }
 }
@@ -193,10 +193,10 @@ STRATEGY_CONFIG = {
         'slow_ma_period': 16,               # Reduced for faster signals  
         'volume_confirmation': True,
         'rsi_filter': True,
-        'rsi_overbought': 70,               # Less restrictive (was 75)
-        'rsi_oversold': 30,                 # Less restrictive (was 25)
-        'atr_stop_multiple': 1.8,           # Tighter stops (was 2.0)
-        'min_atr': 0.015,                   # Lower threshold (was 0.02)
+        'rsi_overbought': 80,               # RELAXED for more signals (was 70)
+        'rsi_oversold': 20,                 # RELAXED for more signals (was 30)
+        'atr_stop_multiple': 2.2,           # RELAXED stops for more entries (was 1.8)
+        'min_atr': 0.01,                    # LOWERED threshold for more opportunities (was 0.015)
         'trailing_stop_enabled': True,      # Add trailing stop feature
         'trailing_stop_pct': 0.08           # 8% trailing stop
     },
@@ -204,8 +204,8 @@ STRATEGY_CONFIG = {
     # Breakout strategy for low volatility regimes
     'breakout_strategy': {
         'consolidation_periods': [5, 10, 20],
-        'volume_expansion_ratio': 2.0,
-        'breakout_threshold': 0.02,         # 2% breakout
+        'volume_expansion_ratio': 1.5,     # LOWERED from 2.0 for more signals
+        'breakout_threshold': 0.015,        # LOWERED from 2% to 1.5% for more breakouts
         'false_breakout_filter': True
     },
     
