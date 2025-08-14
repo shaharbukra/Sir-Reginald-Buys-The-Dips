@@ -89,4 +89,4 @@ assignees: ''
 - [ ] This feature aligns with Sir Reginald's safety-first philosophy
 - [ ] I have considered the impact on both new and experienced users
 - [ ] I am willing to help test this feature when available
-- [ ] I have reviewed the [Premium Roadmap](PREMIUM_ROADMAP.md) to see if this is already planned
+- [ ] I have reviewed the [Premium Roadmap](docs/PREMIUM_ROADMAP.md) to see if this is already planned
