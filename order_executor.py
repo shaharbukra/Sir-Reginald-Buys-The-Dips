@@ -283,6 +283,9 @@ class SimpleTradeExecutor:
             if compliant_take_profit != round(signal.take_profit_price, 2):
                 logger.info(f"📊 {signal.symbol} take profit adjusted: ${signal.take_profit_price:.2f} → ${compliant_take_profit:.2f} (Alpaca compliance)")
             
+            # Pre-check: Cancel any conflicting orders to prevent "insufficient qty" errors
+            await self._clear_conflicting_orders(signal.symbol)
+            
             # Submit bracket order
             order_response = await self.gateway.submit_order(main_order_data)
             
@@ -1724,3 +1727,193 @@ class SimpleTradeExecutor:
                 
         except Exception as e:
             logger.error(f"Order cleanup failed: {e}")
+            
+    async def _verify_bracket_order_legs(self, order_response, signal, max_wait_seconds=30):
+        """Verify that bracket order stop loss and take profit legs are properly created"""
+        try:
+            logger.info(f"🔍 Starting enhanced bracket order verification for {signal.symbol}")
+            main_order_id = order_response.data.id
+            
+            # Wait for bracket legs to be created (they appear as separate orders)
+            for attempt in range(max_wait_seconds):
+                try:
+                    # Get all open orders to find bracket legs
+                    open_orders = await self.gateway.get_orders(status='open')
+                    
+                    # Look for stop loss and take profit orders related to this bracket
+                    stop_loss_found = False
+                    take_profit_found = False
+                    
+                    if open_orders:
+                        for order in open_orders:
+                            order_symbol = getattr(order, 'symbol', None)
+                            order_type = getattr(order, 'type', None) or getattr(order, 'order_type', None)
+                            parent_id = getattr(order, 'parent_order_id', None) or getattr(order, 'legs', {}).get('parent_order_id', None)
+                            
+                            if order_symbol == signal.symbol:
+                                # Check if this order is part of our bracket
+                                if parent_id == main_order_id or (
+                                    order_type in ['stop', 'stop_limit'] and 
+                                    abs(datetime.now().timestamp() - order_response.timestamp) < 60  # Created within last minute
+                                ):
+                                    if order_type in ['stop', 'stop_limit']:
+                                        stop_loss_found = True
+                                        logger.info(f"✅ {signal.symbol}: Stop loss leg verified - {order_type}")
+                                    elif order_type in ['limit', 'take_profit']:
+                                        take_profit_found = True
+                                        logger.info(f"✅ {signal.symbol}: Take profit leg verified - {order_type}")
+                    
+                    # Check if we have the minimum required protection (stop loss)
+                    if stop_loss_found:
+                        if take_profit_found:
+                            logger.info(f"✅ {signal.symbol}: Complete bracket order verification successful (stop + profit)")
+                        else:
+                            logger.info(f"✅ {signal.symbol}: Essential bracket order verification successful (stop loss confirmed)")
+                        return True
+                    
+                    # Wait 1 second before next check
+                    if attempt < max_wait_seconds - 1:
+                        await asyncio.sleep(1)
+                        
+                except Exception as check_error:
+                    logger.warning(f"⚠️ Bracket verification check {attempt + 1} failed for {signal.symbol}: {check_error}")
+                    if attempt < max_wait_seconds - 1:
+                        await asyncio.sleep(1)
+            
+            # Verification failed - no stop loss found within time limit
+            logger.error(f"❌ {signal.symbol}: Bracket order verification FAILED - no stop loss leg found within {max_wait_seconds}s")
+            
+            # Trigger emergency protection creation
+            logger.critical(f"🚨 {signal.symbol}: BRACKET LEGS MISSING - creating emergency protection")
+            await self._create_emergency_bracket_protection(signal.symbol, signal)
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Bracket order verification failed for {signal.symbol}: {e}")
+            return False
+            
+    async def _create_emergency_bracket_protection(self, symbol: str, signal):
+        """Create emergency stop loss and take profit when bracket legs fail"""
+        try:
+            logger.critical(f"🚨 Creating emergency bracket protection for {symbol}")
+            
+            # Get current position to determine quantity
+            positions = await self.gateway.get_all_positions()
+            position = None
+            
+            for pos in positions:
+                if pos.symbol == symbol and float(pos.qty) != 0:
+                    position = pos
+                    break
+            
+            if not position:
+                logger.error(f"❌ No position found for emergency protection: {symbol}")
+                return False
+            
+            qty = abs(float(position.qty))
+            
+            # Cancel any conflicting orders first
+            open_orders = await self.gateway.get_orders(status='open')
+            cancelled_orders = 0
+            
+            if open_orders:
+                for order in open_orders:
+                    if getattr(order, 'symbol', None) == symbol:
+                        try:
+                            await self.gateway.cancel_order(order.id)
+                            cancelled_orders += 1
+                            logger.info(f"🗑️ Cancelled conflicting order: {order.id}")
+                        except Exception as cancel_error:
+                            logger.warning(f"⚠️ Failed to cancel order {order.id}: {cancel_error}")
+            
+            if cancelled_orders > 0:
+                logger.info(f"🧹 Cancelled {cancelled_orders} conflicting orders for {symbol}")
+                # Wait for cancellations to process
+                await asyncio.sleep(2)
+            
+            # Create emergency stop loss
+            stop_order_data = {
+                'symbol': symbol,
+                'qty': str(int(qty)),
+                'side': 'sell' if float(position.qty) > 0 else 'buy',
+                'type': 'stop',
+                'stop_price': str(round(signal.stop_loss_price, 2)),
+                'time_in_force': 'gtc'
+            }
+            
+            stop_response = await self.gateway.submit_order(stop_order_data)
+            
+            if stop_response and stop_response.success:
+                logger.critical(f"✅ Emergency stop loss created: {symbol} @ ${signal.stop_loss_price:.2f}")
+                
+                # Try to create take profit as well
+                try:
+                    profit_order_data = {
+                        'symbol': symbol,
+                        'qty': str(int(qty)),
+                        'side': 'sell' if float(position.qty) > 0 else 'buy',
+                        'type': 'limit',
+                        'limit_price': str(round(signal.take_profit_price, 2)),
+                        'time_in_force': 'gtc'
+                    }
+                    
+                    profit_response = await self.gateway.submit_order(profit_order_data)
+                    
+                    if profit_response and profit_response.success:
+                        logger.info(f"✅ Emergency take profit created: {symbol} @ ${signal.take_profit_price:.2f}")
+                    else:
+                        logger.warning(f"⚠️ Emergency take profit failed for {symbol}")
+                        
+                except Exception as profit_error:
+                    logger.warning(f"Emergency take profit creation failed: {profit_error}")
+                
+                return True
+            else:
+                error_msg = stop_response.error if stop_response else "No response received"
+                logger.critical(f"❌ Emergency stop loss creation FAILED for {symbol}: {error_msg}")
+                return False
+                
+        except Exception as e:
+            logger.critical(f"Emergency bracket protection creation failed for {symbol}: {e}")
+            return False
+            
+    async def _clear_conflicting_orders(self, symbol: str):
+        """Clear any existing orders for a symbol to prevent conflicts"""
+        try:
+            # Get all open orders
+            open_orders = await self.gateway.get_orders(status='open')
+            
+            if not open_orders:
+                return
+            
+            # Find orders for this symbol
+            symbol_orders = [order for order in open_orders if getattr(order, 'symbol', None) == symbol]
+            
+            if symbol_orders:
+                logger.info(f"🧹 Found {len(symbol_orders)} existing orders for {symbol} - clearing to prevent conflicts")
+                
+                for order in symbol_orders:
+                    try:
+                        order_id = order.id
+                        order_type = getattr(order, 'type', 'unknown')
+                        order_side = getattr(order, 'side', 'unknown')
+                        
+                        cancel_response = await self.gateway.cancel_order(order_id)
+                        if cancel_response and cancel_response.success:
+                            logger.info(f"✅ Cancelled {order_type} {order_side} order: {order_id}")
+                        else:
+                            logger.warning(f"⚠️ Failed to cancel order {order_id}")
+                            
+                    except Exception as cancel_error:
+                        logger.warning(f"⚠️ Error cancelling order {order.id}: {cancel_error}")
+                
+                # Wait for cancellations to process
+                if symbol_orders:
+                    await asyncio.sleep(2)
+                    logger.info(f"✅ Cleared {len(symbol_orders)} orders for {symbol}")
+            else:
+                logger.debug(f"🔍 No existing orders found for {symbol}")
+                
+        except Exception as e:
+            logger.warning(f"Error clearing conflicting orders for {symbol}: {e}")
