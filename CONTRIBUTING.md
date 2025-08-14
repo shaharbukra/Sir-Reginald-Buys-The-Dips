@@ -440,7 +440,7 @@ Community leaders are responsible for clarifying and enforcing our standards of 
 
 ### 🚀 **Quick Start Checklist**
 - [ ] Join our [Discord server](https://discord.gg/sir-reginald)
-- [ ] Read the [Wiki](WIKI.md) and [README](README.md)
+- [ ] Read the [Wiki](../../wiki) and [README](README.md)
 - [ ] Set up your development environment
 - [ ] Pick an issue labeled `good-first-issue`
 - [ ] Introduce yourself in Discord #contributors channel

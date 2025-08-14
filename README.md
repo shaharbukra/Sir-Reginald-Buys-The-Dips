@@ -37,7 +37,7 @@ Transform your trading with production-grade AI algorithms that have generated *
 
 ## 📖 Complete Documentation
 
-**👉 [READ THE FULL WIKI](WIKI.md) for comprehensive setup, configuration, and usage instructions**
+**👉 [READ THE FULL WIKI](../../wiki) for comprehensive setup, configuration, and usage instructions**
 
 The wiki contains everything you need:
 - Complete installation guide  
@@ -399,7 +399,7 @@ For complete documentation including:
 - **Troubleshooting**: Common issues and solutions
 - **Advanced Topics**: Custom strategies and performance optimization
 
-**👉 [Read the Complete Wiki](WIKI.md)**
+**👉 [Read the Complete Wiki](../../wiki)**
 
 ## 🌟 Community & Ecosystem
 
@@ -413,7 +413,7 @@ Sir Reginald thrives on community contributions! Join thousands of algorithmic t
 
 ### Getting Help & Support
 
-- **📖 Documentation**: Comprehensive [Wiki](WIKI.md) with setup guides
+- **📖 Documentation**: Comprehensive [Wiki](../../wiki) with setup guides
 - **💬 Community Chat**: Join our [Discord](https://discord.gg/sir-reginald) for real-time support
 - **🐛 Bug Reports**: [GitHub Issues](https://github.com/nullenc0de/Sir-Reginald-Buys-The-Dips/issues) for technical problems
 - **💡 Feature Requests**: [GitHub Discussions](https://github.com/nullenc0de/Sir-Reginald-Buys-The-Dips/discussions) for strategy ideas
