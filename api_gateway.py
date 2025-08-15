@@ -514,15 +514,21 @@ class ResilientAlpacaGateway:
                                 temp_market_status = MarketStatusManager(None)
                                 is_extended, period = temp_market_status.is_extended_hours()
                                 
+                                # Debug logging to see what's happening
+                                logger.debug(f"🔍 Market status check: is_extended={is_extended}, period={period}")
+                                logger.debug(f"🔍 Current config values: {API_CONFIG.get('extended_hours_warning_minutes', 'NOT_SET')}, {API_CONFIG.get('extended_hours_rejection_minutes', 'NOT_SET')}")
+                                
                                 # Use appropriate thresholds based on market hours
                                 if is_extended:
                                     warning_threshold = API_CONFIG.get('extended_hours_warning_minutes', 30)
                                     rejection_threshold = API_CONFIG.get('extended_hours_rejection_minutes', 60)
-                                    logger.debug(f"📊 Extended hours mode - using thresholds: warning={warning_threshold}m, rejection={rejection_threshold}m")
+                                    logger.info(f"📊 Extended hours mode - using thresholds: warning={warning_threshold}m, rejection={rejection_threshold}m")
                                 else:
                                     warning_threshold = API_CONFIG.get('stale_data_warning_minutes', 5)
                                     rejection_threshold = API_CONFIG.get('stale_data_rejection_minutes', 15)
-                                    logger.debug(f"📊 Regular hours mode - using thresholds: warning={warning_threshold}m, rejection={rejection_threshold}m")
+                                    logger.info(f"📊 Regular hours mode - using thresholds: warning={warning_threshold}m, rejection={rejection_threshold}m")
+                                
+                                logger.debug(f"🔍 Final thresholds: warning={warning_threshold}m, rejection={rejection_threshold}m, age={age_minutes:.1f}m")
                                 
                                 if age_minutes > warning_threshold:
                                     logger.warning(f"⚠️ STALE DATA WARNING: {symbol} quote is {age_minutes:.1f} minutes old")
@@ -530,8 +536,17 @@ class ResilientAlpacaGateway:
                                         logger.error(f"🚨 CRITICAL: {symbol} quote is {age_minutes:.1f} minutes old - rejecting")
                                         return None
                                         
-                            except ImportError:
+                            except ImportError as e:
+                                logger.error(f"❌ Failed to import market status manager: {e}")
                                 # Fallback to original hardcoded thresholds if market status manager not available
+                                if age_minutes > 5:
+                                    logger.warning(f"⚠️ STALE DATA WARNING: {symbol} quote is {age_minutes:.1f} minutes old")
+                                    if age_minutes > 15:
+                                        logger.error(f"🚨 CRITICAL: {symbol} quote is {age_minutes:.1f} minutes old - rejecting")
+                                        return None
+                            except Exception as e:
+                                logger.error(f"❌ Error in market status check: {e}")
+                                # Fallback to original hardcoded thresholds
                                 if age_minutes > 5:
                                     logger.warning(f"⚠️ STALE DATA WARNING: {symbol} quote is {age_minutes:.1f} minutes old")
                                     if age_minutes > 15:
