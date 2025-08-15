@@ -47,14 +47,19 @@ class ResilientAlpacaGateway:
         """Initialize the API gateway with authentication"""
         try:
             # Validate credentials
-            if not API_CONFIG['alpaca_key_id'] or not API_CONFIG['alpaca_secret_key']:
+            # Always check environment variables at runtime
+            key_id = API_CONFIG.get('alpaca_key_id') or os.getenv('APCA_API_KEY_ID')
+            secret_key = API_CONFIG.get('alpaca_secret_key') or os.getenv('APCA_API_SECRET_KEY')
+
+            if not key_id or not secret_key:
                 logger.error("Missing Alpaca API credentials")
                 return False
+
                 
             # Create HTTP session
             headers = {
-                'APCA-API-KEY-ID': API_CONFIG['alpaca_key_id'],
-                'APCA-API-SECRET-KEY': API_CONFIG['alpaca_secret_key'],
+                'APCA-API-KEY-ID': key_id,
+                'APCA-API-SECRET-KEY': secret_key,
                 'Content-Type': 'application/json'
             }
             

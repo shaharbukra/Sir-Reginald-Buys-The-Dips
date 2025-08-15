@@ -1,1 +1,7 @@
-{"initial_value": 1977.04, "date_started": "2025-08-06T18:07:36.472875"}
+{
+  "initial_value": 35000.0,
+  "date_started": "2025-08-15T23:18:38.939152",
+  "reset_reason": "Manual reset by user",
+  "previous_value": 35000.0,
+  "previous_date": "2025-08-06T18:07:36.472875"
+}

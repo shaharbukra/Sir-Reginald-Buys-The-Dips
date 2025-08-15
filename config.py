@@ -43,7 +43,10 @@ API_CONFIG = {
     'request_timeout': 15,
     'max_retries': 3,
     'retry_backoff_factor': 2,
-    'websocket_heartbeat_interval': 30
+    'websocket_heartbeat_interval': 30,
+    'enable_extended_hours_trading': True,  # Enable pre-market and after-hours trading
+    'extended_hours_start': '04:00',        # 4:00 AM ET
+    'extended_hours_end': '20:00'          # 8:00 PM ET
 }
 
 # === INTELLIGENT FUNNEL CONFIGURATION ===
@@ -216,6 +219,50 @@ STRATEGY_CONFIG = {
         'rsi_extreme_threshold': 20,        # RSI < 20 or > 80
         'volume_confirmation': True,
         'max_position_hold_days': 3
+    }
+}
+
+# === EXTENDED HOURS TRADING CONFIGURATION ===
+EXTENDED_HOURS_CONFIG = {
+    'enable_trading': True,                 # Enable actual trading during extended hours
+    'trading_hours': {
+        'pre_market': {
+            'start': '04:00',               # 4:00 AM ET
+            'end': '09:30',                 # 9:30 AM ET
+            'enabled': True,
+            'strategy_adjustments': {
+                'max_position_size_pct': 0.03,  # Smaller positions (3% vs 5%)
+                'min_volume_ratio': 2.0,        # Higher volume requirements
+                'max_spread_pct': 1.5,          # Tighter spread requirements
+                'use_limit_orders_only': True,   # Limit orders only for safety
+                'min_price_change_pct': 0.5     # Minimum move to consider
+            }
+        },
+        'after_hours': {
+            'start': '16:00',               # 4:00 PM ET
+            'end': '20:00',                 # 8:00 PM ET
+            'enabled': True,
+            'strategy_adjustments': {
+                'max_position_size_pct': 0.03,  # Smaller positions (3% vs 5%)
+                'min_volume_ratio': 2.0,        # Higher volume requirements
+                'max_spread_pct': 1.5,          # Tighter spread requirements
+                'use_limit_orders_only': True,   # Limit orders only for safety
+                'min_price_change_pct': 0.5     # Minimum move to consider
+            }
+        }
+    },
+    'risk_management': {
+        'max_overnight_positions': 3,       # Limit overnight exposure
+        'overnight_position_size_pct': 0.02, # Max 2% per overnight position
+        'gap_risk_threshold': -0.05,        # Alert at -5% gap risk
+        'emergency_sell_threshold': -0.08,   # Emergency sell at -8%
+        'pre_market_earnings_filter': True,  # Filter out earnings during pre-market
+        'news_impact_assessment': True       # Assess news impact before trading
+    },
+    'order_types': {
+        'pre_market': ['limit', 'stop_limit'],    # Only limit orders pre-market
+        'after_hours': ['limit', 'stop_limit'],   # Only limit orders after-hours
+        'regular_hours': ['market', 'limit', 'stop', 'stop_limit']  # All order types during regular hours
     }
 }
 

@@ -70,6 +70,9 @@ class IntelligentTradingSystem:
         self.pdt_manager = PDTManager()  # CRITICAL: PDT rule compliance
         self.gap_risk_manager = GapRiskManager()  # CRITICAL: Extended hours gap protection
         
+        # Extended hours trading
+        self.extended_hours_trader = None  # Will be initialized after market status manager
+        
         # System state
         self.current_intelligence: Optional[MarketIntelligence] = None
         self.active_opportunities: List[MarketOpportunity] = []
@@ -160,10 +163,36 @@ class IntelligentTradingSystem:
             await self.performance_tracker.initialize()
             self.logger.info("✅ Performance Tracker ready")
             
+            # SMART SETUP: Check if initial value needs smart configuration
+            if hasattr(self.performance_tracker, 'initial_value') and self.performance_tracker.initial_value:
+                # Check if the initial value seems reasonable
+                current_pct_change = abs((account_value - self.performance_tracker.initial_value) / self.performance_tracker.initial_value) * 100
+                if current_pct_change > 1000:  # More than 1000% change suggests incorrect initial value
+                    self.logger.warning(f"⚠️ SUSPICIOUS INITIAL VALUE DETECTED!")
+                    self.logger.warning(f"   Initial: ${self.performance_tracker.initial_value:,.2f}")
+                    self.logger.warning(f"   Current: ${account_value:,.2f}")
+                    self.logger.warning(f"   Change: {current_pct_change:.1f}%")
+                    self.logger.warning(f"   This suggests the initial value may be incorrect")
+                    self.logger.warning(f"   Consider using reset_initial_account_value() method to fix this")
+                    self.logger.warning(f"   Or run the system again to trigger smart auto-setup")
+            
             # Initialize PDT manager
             await self.pdt_manager.initialize(self.gateway)
             self.order_executor.pdt_manager = self.pdt_manager  # Link PDT manager to executor
             self.logger.info("✅ PDT Manager ready")
+            
+            # Initialize market status manager
+            self.market_status = MarketStatusManager(self.gateway)
+            self.logger.info("✅ Market Status Manager initialized")
+            
+            # Initialize extended hours trader
+            from extended_hours_trader import ExtendedHoursTrader
+            self.extended_hours_trader = ExtendedHoursTrader(
+                self.gateway, 
+                self.risk_manager, 
+                self.market_status
+            )
+            self.logger.info("✅ Extended Hours Trader initialized")
             
             # STARTUP SAFETY CHECK: Scan for naked positions without stop protection
             await self._startup_position_safety_check()
@@ -1314,7 +1343,19 @@ class IntelligentTradingSystem:
                 should_trade, reason = await self.market_status.should_start_trading()
                 should_monitor_extended = self.market_status.should_monitor_positions_extended_hours()
                 
+                # Add debugging information
+                time_info = self.market_status.get_current_time_info()
+                self.logger.info(f"🕐 Time Debug Info:")
+                for key, value in time_info.items():
+                    self.logger.info(f"   {key}: {value}")
+                
+                self.logger.info(f"📈 Market Status Check:")
+                self.logger.info(f"   Should Trade: {should_trade}")
+                self.logger.info(f"   Reason: {reason}")
+                self.logger.info(f"   Should Monitor Extended: {should_monitor_extended}")
+                
                 if should_trade:
+                    self.logger.info("✅ Market is open - starting trading loop")
                     break
                 elif should_monitor_extended:
                     self.logger.info(f"⏰ {reason} - but monitoring positions for gap risk")
@@ -1383,7 +1424,13 @@ class IntelligentTradingSystem:
                 try:
                     await self._monitor_position_protection()
                 except Exception as e:
-                    self.logger.error(f"❌ CRITICAL: Position protection monitoring error: {e}")
+                    self.logger.error(f"❌ CRITICAL: Position protection error: {e}")
+                
+                # === EXTENDED HOURS TRADING ===
+                try:
+                    await self._handle_extended_hours_trading()
+                except Exception as e:
+                    self.logger.error(f"❌ Extended hours trading error: {e}")
                 
                 # === STOP LOSS & TRAILING STOPS (CRITICAL) ===
                 try:
@@ -1403,6 +1450,12 @@ class IntelligentTradingSystem:
                     await self._update_performance_metrics()
                 except Exception as e:
                     self.logger.error(f"❌ Performance tracking error: {e}")
+                
+                # === EXTENDED HOURS POSITION CLEANUP (Before market close) ===
+                try:
+                    await self._cleanup_extended_hours_positions()
+                except Exception as e:
+                    self.logger.error(f"❌ Extended hours cleanup error: {e}")
                 
                 # === GAP RISK MONITORING (Record closes before 4 PM) ===
                 try:
@@ -3208,6 +3261,82 @@ class IntelligentTradingSystem:
             'session_statistics': self.session_stats,
             'final_account_status': 'UNKNOWN'  # Would get actual account data
         }
+
+    async def _handle_extended_hours_trading(self):
+        """Handle extended hours trading logic"""
+        try:
+            # Check if extended hours trader is initialized
+            if not self.extended_hours_trader:
+                return
+            
+            # Check if we should be trading during extended hours
+            if not await self.extended_hours_trader.should_trade_extended_hours():
+                return
+            
+            self.logger.info("🌙 Extended hours trading session active")
+            
+            # Scan for extended hours opportunities
+            opportunities = await self.extended_hours_trader.get_extended_hours_opportunities()
+            
+            if opportunities:
+                self.logger.info(f"📊 Found {len(opportunities)} extended hours opportunities")
+                
+                # Execute trades for top opportunities
+                for opportunity in opportunities[:3]:  # Limit to top 3
+                    try:
+                        success = await self.extended_hours_trader.execute_extended_hours_trade(opportunity)
+                        if success:
+                            self.logger.info(f"✅ Extended hours trade executed: {opportunity['symbol']}")
+                        else:
+                            self.logger.warning(f"⚠️ Extended hours trade failed: {opportunity['symbol']}")
+                    except Exception as trade_error:
+                        self.logger.error(f"❌ Extended hours trade execution error for {opportunity['symbol']}: {trade_error}")
+            
+            # Monitor existing extended hours positions
+            await self.extended_hours_trader.monitor_extended_hours_positions()
+            
+        except Exception as e:
+            self.logger.error(f"Extended hours trading error: {e}")
+    
+    async def reset_initial_account_value(self, new_initial_value: float):
+        """Utility method to reset the initial account value (useful for fixing incorrect P&L calculations)"""
+        try:
+            if not self.performance_tracker:
+                self.logger.error("❌ Performance tracker not initialized")
+                return False
+                
+            success = self.performance_tracker.reset_initial_value(new_initial_value)
+            if success:
+                self.logger.info(f"✅ Initial account value reset to ${new_initial_value:,.2f}")
+                self.logger.info(f"   This will fix incorrect P&L calculations")
+                
+                # Refresh performance data to show corrected values
+                await self._display_performance_summary()
+                return True
+            else:
+                self.logger.error("❌ Failed to reset initial account value")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"❌ Error resetting initial account value: {e}")
+            return False
+    
+    async def _cleanup_extended_hours_positions(self):
+        """Clean up extended hours positions before market close"""
+        try:
+            if not self.extended_hours_trader:
+                return
+            
+            # Check if we're approaching market close
+            current_time = datetime.now().time()
+            market_close = time(15, 45)  # 3:45 PM ET - 15 minutes before close
+            
+            if current_time >= market_close:
+                self.logger.info("🧹 Cleaning up extended hours positions before market close")
+                await self.extended_hours_trader.cleanup_overnight_positions()
+            
+        except Exception as e:
+            self.logger.error(f"Extended hours cleanup error: {e}")
 
 # Signal handlers for graceful shutdown
 def setup_signal_handlers(trading_system, loop):

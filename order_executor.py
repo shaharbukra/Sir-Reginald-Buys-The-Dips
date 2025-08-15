@@ -8,6 +8,7 @@ from datetime import datetime
 import asyncio
 from config import *
 from alerter import CriticalAlerter
+from market_status_manager import MarketStatusManager
 
 logger = logging.getLogger(__name__)
 
@@ -244,9 +245,43 @@ class SimpleTradeExecutor:
     async def _execute_bracket_order(self, signal, quantity: int) -> bool:
         """Execute bracket order with main order, stop loss, and take profit"""
         try:
+            # Check if we're in extended hours and adjust order parameters accordingly
+            market_status = MarketStatusManager(None)  # We don't need the trading client for this check
+            
+            is_extended_hours = market_status.is_extended_hours()[0]
+            allowed_order_types = market_status.get_allowed_order_types()
+            strategy_adjustments = market_status.get_extended_hours_strategy_adjustments()
+            
             # Main order (market buy) with Alpaca-compliant pricing
             # Ensure stop loss is at least $0.01 below entry price and take profit is at least $0.01 above
             entry_price = signal.entry_price
+            
+            # Apply extended hours adjustments if applicable
+            if is_extended_hours and strategy_adjustments:
+                # Adjust position size for extended hours
+                if 'max_position_size_pct' in strategy_adjustments:
+                    max_size_pct = strategy_adjustments['max_position_size_pct']
+                    # Recalculate quantity based on smaller position size
+                    account = await self.gateway.get_account_safe()
+                    if account:
+                        account_value = float(account.equity)
+                        max_position_value = account_value * max_size_pct
+                        adjusted_quantity = int(max_position_value / entry_price)
+                        if adjusted_quantity < quantity:
+                            quantity = adjusted_quantity
+                            logger.info(f"📊 Extended hours: Position size reduced to {quantity} shares ({max_size_pct:.1%} of account)")
+                
+                # Use limit orders only during extended hours for safety
+                if strategy_adjustments.get('use_limit_orders_only', False):
+                    order_type = 'limit'
+                    # Add small buffer to limit price for better fill probability
+                    limit_price = entry_price * 1.005  # 0.5% above current price
+                else:
+                    order_type = 'market'
+                    limit_price = None
+            else:
+                order_type = 'market'
+                limit_price = None
             
             # Calculate compliant prices
             min_stop_price = entry_price - 0.01
@@ -262,20 +297,39 @@ class SimpleTradeExecutor:
             compliant_stop_price = round(compliant_stop_price, 2)
             compliant_take_profit = round(compliant_take_profit, 2)
             
-            main_order_data = {
-                'symbol': signal.symbol,
-                'qty': str(quantity),
-                'side': signal.action.lower(),
-                'type': 'market',
-                'time_in_force': 'day',
-                'order_class': 'bracket',
-                'stop_loss': {
-                    'stop_price': str(compliant_stop_price)
-                },
-                'take_profit': {
-                    'limit_price': str(compliant_take_profit)
+            # Build order data based on market hours
+            if is_extended_hours and order_type == 'limit' and limit_price is not None:
+                main_order_data = {
+                    'symbol': signal.symbol,
+                    'qty': str(quantity),
+                    'side': signal.action.lower(),
+                    'type': 'limit',
+                    'limit_price': str(round(limit_price, 2)),
+                    'time_in_force': 'day',
+                    'order_class': 'bracket',
+                    'stop_loss': {
+                        'stop_price': str(compliant_stop_price)
+                    },
+                    'take_profit': {
+                        'limit_price': str(compliant_take_profit)
+                    }
                 }
-            }
+                logger.info(f"📊 Extended hours: Using limit order @ ${limit_price:.2f}")
+            else:
+                main_order_data = {
+                    'symbol': signal.symbol,
+                    'qty': str(quantity),
+                    'side': signal.action.lower(),
+                    'type': 'market',
+                    'time_in_force': 'day',
+                    'order_class': 'bracket',
+                    'stop_loss': {
+                        'stop_price': str(compliant_stop_price)
+                    },
+                    'take_profit': {
+                        'limit_price': str(compliant_take_profit)
+                    }
+                }
             
             # Log price adjustments if any were made
             if compliant_stop_price != round(signal.stop_loss_price, 2):

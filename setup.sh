@@ -126,8 +126,8 @@ else
 fi
 
 # Pull required model
-print_step "Downloading Llama3 13B model (this may take a while)..."
-ollama pull llama3:13b
+print_step "Downloading Llama3.1 8B model (this may take a while)..."
+ollama pull llama3.1:8b
 print_status "AI model downloaded ✓"
 
 # Create environment file template
