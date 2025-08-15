@@ -46,7 +46,12 @@ API_CONFIG = {
     'websocket_heartbeat_interval': 30,
     'enable_extended_hours_trading': True,  # Enable pre-market and after-hours trading
     'extended_hours_start': '04:00',        # 4:00 AM ET
-    'extended_hours_end': '20:00'          # 8:00 PM ET
+    'extended_hours_end': '20:00',          # 8:00 PM ET
+    # Stale data thresholds (in minutes)
+    'stale_data_warning_minutes': 5,        # Warning threshold for regular hours
+    'stale_data_rejection_minutes': 15,     # Rejection threshold for regular hours
+    'extended_hours_warning_minutes': 30,   # Warning threshold for extended hours
+    'extended_hours_rejection_minutes': 60  # Rejection threshold for extended hours
 }
 
 # === INTELLIGENT FUNNEL CONFIGURATION ===

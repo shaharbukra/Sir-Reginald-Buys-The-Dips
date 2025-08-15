@@ -503,15 +503,40 @@ class ResilientAlpacaGateway:
                             else:
                                 quote_timestamp = datetime.fromtimestamp(quote_time)
                             
-                            # Check if data is stale (older than 5 minutes)
+                            # Check if data is stale (configurable thresholds based on market hours)
                             now = datetime.now(quote_timestamp.tzinfo) if quote_timestamp.tzinfo else datetime.now()
                             age_minutes = (now - quote_timestamp).total_seconds() / 60
                             
-                            if age_minutes > 5:
-                                logger.warning(f"⚠️ STALE DATA WARNING: {symbol} quote is {age_minutes:.1f} minutes old")
-                                if age_minutes > 15:
-                                    logger.error(f"🚨 CRITICAL: {symbol} quote is {age_minutes:.1f} minutes old - rejecting")
-                                    return None
+                            # Import market status manager to check if we're in extended hours
+                            try:
+                                from market_status_manager import MarketStatusManager
+                                # Create a temporary instance to check market status
+                                temp_market_status = MarketStatusManager(None)
+                                is_extended, period = temp_market_status.is_extended_hours()
+                                
+                                # Use appropriate thresholds based on market hours
+                                if is_extended:
+                                    warning_threshold = API_CONFIG.get('extended_hours_warning_minutes', 30)
+                                    rejection_threshold = API_CONFIG.get('extended_hours_rejection_minutes', 60)
+                                    logger.debug(f"📊 Extended hours mode - using thresholds: warning={warning_threshold}m, rejection={rejection_threshold}m")
+                                else:
+                                    warning_threshold = API_CONFIG.get('stale_data_warning_minutes', 5)
+                                    rejection_threshold = API_CONFIG.get('stale_data_rejection_minutes', 15)
+                                    logger.debug(f"📊 Regular hours mode - using thresholds: warning={warning_threshold}m, rejection={rejection_threshold}m")
+                                
+                                if age_minutes > warning_threshold:
+                                    logger.warning(f"⚠️ STALE DATA WARNING: {symbol} quote is {age_minutes:.1f} minutes old")
+                                    if age_minutes > rejection_threshold:
+                                        logger.error(f"🚨 CRITICAL: {symbol} quote is {age_minutes:.1f} minutes old - rejecting")
+                                        return None
+                                        
+                            except ImportError:
+                                # Fallback to original hardcoded thresholds if market status manager not available
+                                if age_minutes > 5:
+                                    logger.warning(f"⚠️ STALE DATA WARNING: {symbol} quote is {age_minutes:.1f} minutes old")
+                                    if age_minutes > 15:
+                                        logger.error(f"🚨 CRITICAL: {symbol} quote is {age_minutes:.1f} minutes old - rejecting")
+                                        return None
                         except Exception as timestamp_error:
                             logger.debug(f"Could not validate timestamp for {symbol}: {timestamp_error}")
                     
