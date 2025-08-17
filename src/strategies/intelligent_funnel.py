@@ -13,8 +13,8 @@ import pandas as pd
 import numpy as np
 from collections import defaultdict, deque
 import json
-from config import *
-from tiered_analyzer import TieredAnalyzer, AnalysisResult, AnalysisTier
+from ..core.config import *
+from .tiered_analyzer import TieredAnalyzer, AnalysisResult, AnalysisTier
 
 logger = logging.getLogger(__name__)
 

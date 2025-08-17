@@ -15,18 +15,16 @@ async def main():
     
     # Test 1: Configuration validation
     try:
-        from config import validate_configuration
+        from ..core.config import validate_configuration
         validate_configuration()
         validation_results.append("✅ Configuration validation: PASSED")
     except Exception as e:
         validation_results.append(f"❌ Configuration validation: FAILED - {e}")
-        
+
     # Test 2: API Gateway connection
     try:
-        from api_gateway import ResilientAlpacaGateway
+        from ..core.api_gateway import ResilientAlpacaGateway
         gateway = ResilientAlpacaGateway()
-        
-        # Only test if credentials are provided
         if os.getenv('APCA_API_KEY_ID') and os.getenv('APCA_API_SECRET_KEY'):
             success = await gateway.initialize()
             if success:
@@ -36,26 +34,23 @@ async def main():
                 validation_results.append("❌ API Gateway connection: FAILED")
         else:
             validation_results.append("⚠️ API Gateway connection: SKIPPED (no credentials)")
-            
     except Exception as e:
         validation_results.append(f"❌ API Gateway connection: FAILED - {e}")
-        
+
     # Test 3: AI Assistant initialization
     try:
-        from ai_market_intelligence import EnhancedAIAssistant
+        from ..ai_intelligence.ai_market_intelligence import EnhancedAIAssistant
         ai = EnhancedAIAssistant()
         await ai.initialize()
         validation_results.append("✅ AI Assistant initialization: PASSED")
         await ai.shutdown()
     except Exception as e:
         validation_results.append(f"❌ AI Assistant initialization: FAILED - {e}")
-        
+
     # Test 4: Market Funnel components
     try:
-        from intelligent_funnel import IntelligentMarketFunnel, MarketOpportunity
+        from ..strategies.intelligent_funnel import IntelligentMarketFunnel, MarketOpportunity
         from datetime import datetime
-        
-        # Create test opportunity
         test_opportunity = MarketOpportunity(
             symbol="TEST",
             discovery_source="test",
@@ -68,14 +63,13 @@ async def main():
             market_cap=1000000000,
             sector="TECHNOLOGY"
         )
-        
         validation_results.append("✅ Market Funnel components: PASSED")
     except Exception as e:
         validation_results.append(f"❌ Market Funnel components: FAILED - {e}")
-        
+
     # Test 5: Risk Manager
     try:
-        from risk_manager import ConservativeRiskManager
+        from ..risk_management.risk_manager import ConservativeRiskManager
         risk_manager = ConservativeRiskManager()
         await risk_manager.initialize(10000.0)
         validation_results.append("✅ Risk Manager: PASSED")

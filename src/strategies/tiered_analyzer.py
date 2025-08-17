@@ -14,7 +14,7 @@ import numpy as np
 from collections import defaultdict, deque
 import json
 from enum import Enum
-from config import *
+from ..core.config import *
 
 logger = logging.getLogger(__name__)
 

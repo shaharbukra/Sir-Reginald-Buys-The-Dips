@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, time
 import re
-from config import *
+from ..core.config import *
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ class EnhancedAIAssistant:
         """Get market index data for analysis"""
         try:
             # Import here to avoid circular imports
-            from supplemental_data_provider import SupplementalDataProvider
+            from ..data_management.supplemental_data_provider import SupplementalDataProvider
             
             data_provider = SupplementalDataProvider()
             await data_provider.initialize()  # CRITICAL: Initialize the session

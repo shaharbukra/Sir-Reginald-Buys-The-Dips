@@ -53,6 +53,7 @@ python test_api.py
 ```
 Sir-Reginald-Buys-The-Dips/
 ├── README.md                    # Main project documentation
+├── main.py                      # Entry point (imports from src/)
 ├── tests/                       # All test files
 │   ├── __init__.py
 │   ├── run_all_tests.py        # Test runner
@@ -61,17 +62,24 @@ Sir-Reginald-Buys-The-Dips/
 ├── docs/                        # Documentation
 │   ├── markdown/               # Markdown documentation
 │   │   ├── INDEX.md            # This file
+│   │   ├── PROJECT_STRUCTURE.md # Complete project structure
 │   │   ├── SYSTEM_FLOW_ANALYSIS.md
 │   │   ├── EXTENDED_HOURS_GUIDE.md
 │   │   ├── CONTRIBUTING.md
 │   │   ├── WIKI_MIGRATION_NOTE.md
 │   │   └── CLAUDE.md
 │   └── ...                     # Other documentation
-├── main.py                      # Main trading system
-├── config.py                    # Configuration
-├── api_gateway.py              # API management
-└── ...                         # Other source files
+└── src/                         # Source code (organized by functionality)
+    ├── core/                    # Core system components
+    ├── strategies/              # Trading strategies
+    ├── risk_management/         # Risk management
+    ├── data_management/         # Data handling
+    ├── ai_intelligence/         # AI components
+    ├── utilities/               # Utility functions
+    └── scripts/                 # Utility scripts
 ```
+
+**📋 [View Complete Project Structure](PROJECT_STRUCTURE.md)**
 
 ## 🔧 Development Workflow
 

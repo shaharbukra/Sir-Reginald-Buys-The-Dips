@@ -25,12 +25,14 @@ if ! pgrep -x "ollama" > /dev/null; then
     sleep 5
 fi
 
-# Export environment variables
-export $(cat .env | xargs)
+
+# Export environment variables (ignore comments and blank lines)
+export $(grep -v '^#' .env | grep -v '^$' | xargs)
+
 
 # Validate configuration
 echo "Validating system configuration..."
-python -c "from config import validate_configuration; validate_configuration()"
+python -c "from src.core.config import validate_configuration; validate_configuration()"
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}❌ Configuration validation failed${NC}"

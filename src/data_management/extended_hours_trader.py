@@ -7,8 +7,8 @@ import logging
 import asyncio
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, time
-from config import EXTENDED_HOURS_CONFIG
-from market_status_manager import MarketStatusManager
+from ..core.config import EXTENDED_HOURS_CONFIG
+from .market_status_manager import MarketStatusManager
 
 logger = logging.getLogger(__name__)
 

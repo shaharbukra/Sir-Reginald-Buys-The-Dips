@@ -9,7 +9,7 @@ from typing import Dict, List, Set, Optional
 from datetime import datetime, timedelta
 import asyncio
 import aiohttp
-from config import *
+from ..core.config import *
 
 logger = logging.getLogger(__name__)
 

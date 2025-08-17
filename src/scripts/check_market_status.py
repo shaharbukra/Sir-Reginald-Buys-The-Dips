@@ -5,7 +5,7 @@ Simple command-line tool to check market status and timezone information
 
 import asyncio
 import logging
-from market_status_manager import MarketStatusManager
+from ..data_management.market_status_manager import MarketStatusManager
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')

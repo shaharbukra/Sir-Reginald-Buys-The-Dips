@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import numpy as np
 import pandas as pd
-from config import *
+from ..core.config import *
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ Directly queries Alpaca API to verify position protection status
 import asyncio
 import os
 import sys
-from api_gateway import ResilientAlpacaGateway
+from ..core.api_gateway import ResilientAlpacaGateway
 
 async def check_position_protection():
     """Check if positions have stop loss protection"""

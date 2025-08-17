@@ -6,9 +6,9 @@ import logging
 from typing import Dict, List, Optional
 from datetime import datetime
 import asyncio
-from config import *
-from alerter import CriticalAlerter
-from market_status_manager import MarketStatusManager
+from ..core.config import *
+from ..ai_intelligence.alerter import CriticalAlerter
+from ..data_management.market_status_manager import MarketStatusManager
 
 logger = logging.getLogger(__name__)
 

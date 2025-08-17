@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import aiohttp
 from dataclasses import dataclass
-from config import *
+from .config import *
 
 logger = logging.getLogger(__name__)
 
@@ -509,7 +509,7 @@ class ResilientAlpacaGateway:
                             
                             # Import market status manager to check if we're in extended hours
                             try:
-                                from market_status_manager import MarketStatusManager
+                                from ..data_management.market_status_manager import MarketStatusManager
                                 # Create a temporary instance to check market status
                                 temp_market_status = MarketStatusManager(None)
                                 is_extended, period = temp_market_status.is_extended_hours()
